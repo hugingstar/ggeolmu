@@ -16,33 +16,40 @@ flowchart TD
     %% 도커 네트워크 내부
     subgraph DockerNetwork ["Docker Internal Network (ggeolmu_default)"]
         
+        %% Manager Tier (Scheduler & Workflow)
+        Manager["manager (n8n) <br> (Port: 5678) <br> * 워크플로우 엔진"]
+        
         %% DB Tier
-        DB[("postgres:15-alpine\n(Port: 5432)")]
+        DB[("postgres:15-alpine <br> (Port: 5432) <br> * 데이터 저장소")]
         
         %% WAS Tier (Backend)
-        WAS["was (FastAPI)\n(Port: 8000)"]
+        WAS["was (FastAPI) <br> (Port: 8000) <br> * 데이터 서빙"]
         
         %% WEB Tier (Frontend)
-        WEB["web (Nginx)\n(Port: 3000)"]
+        WEB["web (Nginx) <br> (Port: 3000) <br> * UI 프론트엔드"]
     end
 
     %% 실행 트리거 및 의존성 (depends_on)
     DB -. "1순위 구동" .-> WAS
+    DB -. "1순위 구동" .-> Manager
     WAS -. "2순위 구동" .-> WEB
 
     %% 파일 시스템 볼륨 매핑
-    LocalData <==>|Volume Mount| DB
+    LocalData <==>|Volume Mount (데이터 영구보존)| DB
+    LocalData <==>|Volume Mount (n8n 설정 보존)| Manager
     LocalParser -->|Build COPY| WAS
     LocalParser -->|Build COPY| WEB
+    LocalParser <==>|Volume Mount (실시간 파이썬 접근)| Manager
 
     %% 데이터 흐름 및 접근
     User == "1. 브라우저 접속 (http://localhost:3000)" ==> WEB
     WEB -- "2. API 요청 (Ajax/Fetch)" --> WAS
     WAS -- "3. SQL 쿼리 (psycopg2)" --> DB
     
-    %% 관리자 데이터 파이프라인 트리거 (수동)
-    Admin == "수동 실행 (python main.py)" ==> LocalParser
-    LocalParser -- "Dask 가공 후 DB 적재 (Bulk Insert)" --> DB
+    %% 관리자 데이터 파이프라인 트리거 (자동화)
+    Admin == "4. 워크플로우 및 스케줄 등록 (localhost:5678)" ==> Manager
+    Manager -- "5. 매일 정해진 스케줄(Cron)에 따라 <br> 컨테이너 내부에서 python main.py 실행" --> LocalParser
+    LocalParser -- "6. Dask 가공 후 DB 적재 (Bulk Insert)" --> DB
 
     classDef container fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
     classDef storage fill:#334155,stroke:#10b981,stroke-width:2px,color:#fff;

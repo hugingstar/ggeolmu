@@ -1,24 +1,27 @@
-FROM n8nio/n8n:latest
+FROM node:20-bullseye
 
-# 패키지 설치를 위해 root 유저로 전환
+# n8n 글로벌 설치 시 에러 방지를 위한 유저 세팅 (선택)
 USER root
 
-# Python 3 및 필수 빌드 패키지 설치 (PostgreSQL 드라이버 빌드용 포함)
-# n8n 최신 이미지는 Alpine을 주로 사용
-RUN apk update && apk add --no-cache \
+# Python 3 및 필수 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    py3-pip \
-    build-base \
+    python3-pip \
+    python3-venv \
+    build-essential \
     python3-dev \
-    postgresql-dev \
-    && ln -sf python3 /usr/bin/python || true
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# 파이프라인 필수 라이브러리 설치
-# 호스트의 requirements.txt를 복사
+# 가상환경(venv) 생성 및 파이프라인 의존성 설치
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
 COPY ./Parser/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# pip 설치 시 시스템 패키지 매니저 충돌 방지 
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt --break-system-packages || pip3 install --no-cache-dir -r /tmp/requirements.txt
+# n8n 워크플로우 엔진 글로벌 설치
+RUN npm install -g n8n
 
-# n8n의 기본 실행 유저인 node 로 복구
-USER node
+EXPOSE 5678
+CMD ["n8n"]
