@@ -90,7 +90,7 @@ erDiagram
 ## 3. 파이프라인 단계 및 모듈 역할
 
 ### 3.1. 데이터 수집 및 DB 적재 파이프라인 (`main.py`)
-파이프라인 관리 모듈은 더 이상 AWS S3를 사용하지 않으며, 로컬 `DBManager`를 통해 DB로 직접 데이터를 꽂아 넣습니다.
+파이프라인 관리 모듈은 로컬 `DBManager`를 통해 PostgreSQL 데이터베이스에 데이터를 직접 적재합니다.
 - **`get_fdr.py`**: FinanceDataReader 기반 초기 데이터 크롤링 수행
 - **`process_a1.py`, `process_b1.py`**: Dask 기반 시그널 데이터 및 기술적 지표 시트 분할 생성
 - **`db_manager.py`**: 파이프라인 1.5단계에서 `insert_raw_data` 쿼리 스크립트를 사용하여 수집된 Raw 데이터를 PostgreSQL로 Bulk Insert 함
