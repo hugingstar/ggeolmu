@@ -35,11 +35,11 @@ flowchart TD
     WAS -. "2순위 구동" .-> WEB
 
     %% 파일 시스템 볼륨 매핑
-    LocalData <==>|Volume Mount (데이터 영구보존)| DB
-    LocalData <==>|Volume Mount (n8n 설정 보존)| Manager
+    LocalData <==>|Volume Mount : 데이터 영구보존| DB
+    LocalData <==>|Volume Mount : n8n 설정 보존| Manager
     LocalParser -->|Build COPY| WAS
     LocalParser -->|Build COPY| WEB
-    LocalParser <==>|Volume Mount (실시간 파이썬 접근)| Manager
+    LocalParser <==>|Volume Mount : 실시간 파이썬 접근| Manager
 
     %% 데이터 흐름 및 접근
     User == "1. 브라우저 접속 (http://localhost:3000)" ==> WEB
