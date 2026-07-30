@@ -1,18 +1,17 @@
 # 🤖 Ggeolmu Multi-Agent Stock Parser & Analyzer
 
 ## 1. 개요
-`Ggeolmu Parser` 모듈은 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집하고 가공하여 **PostgreSQL 데이터베이스에 적재**하는 자동화 파이프라인입니다. 
-추가적으로, 적재된 시계열 데이터를 바탕으로 LLM 기반 분석 프롬프트를 자동으로 생성해 내는 **멀티 에이전트(Multi-Agent) 시스템**과 **웹(Web) 프론트엔드**를 통합 제공합니다.
+`Ggeolmu Parser` 모듈은 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집하고 가공하여 **PostgreSQL 데이터베이스에 적재**하는 핵심 데이터 파이프라인입니다. 
+웹이나 WAS 등 불필요한 레이어를 제거하고, 오직 **n8n 매니저**를 통해 파이프라인 코드를 스케줄링하고 자동화하는 간소화된 구조를 채택했습니다.
 
 ## 2. 시스템 아키텍처 및 도커 환경
 
-시스템은 4-Tier 아키텍처(WEB, WAS, DB, Manager) 구조를 따르며, `docker compose up -d --build` 명령어를 통해 손쉽게 로컬에서 전체 환경을 기동할 수 있습니다.
+시스템은 파이프라인 실행과 적재에 최적화된 2-Tier 아키텍처(Manager, DB) 구조를 따르며, `docker compose up -d --build` 명령어를 통해 손쉽게 로컬에서 전체 환경을 기동할 수 있습니다.
 
 ```mermaid
 flowchart TD
     %% 사용자 및 로컬 호스트
-    User(("사용자"))
-    Admin(("관리자"))
+    Admin(("파이프라인 관리자"))
     
     subgraph Host ["Host Machine (Mac/PC)"]
         LocalData[/"./Data/pgdata"/]
@@ -21,46 +20,30 @@ flowchart TD
 
     %% 도커 네트워크 내부
     subgraph DockerNetwork ["Docker Internal Network (ggeolmu_default)"]
-        
         %% Manager Tier (Scheduler & Workflow)
-        Manager["manager (n8n) <br> (Port: 5678) <br> * 워크플로우 엔진"]
+        Manager["manager (n8n) <br> (Port: 5678) <br> * 워크플로우 엔진 & 실행 환경"]
         
         %% DB Tier
         DB[("postgres:15-alpine <br> (Port: 5432) <br> * 데이터 저장소")]
-        
-        %% WAS Tier (Backend)
-        WAS["was (FastAPI) <br> (Port: 8000) <br> * 데이터 서빙"]
-        
-        %% WEB Tier (Frontend)
-        WEB["web (Nginx) <br> (Port: 3000) <br> * UI 프론트엔드"]
     end
 
     %% 실행 트리거 및 의존성 (depends_on)
-    DB -. "1순위 구동" .-> WAS
     DB -. "1순위 구동" .-> Manager
-    WAS -. "2순위 구동" .-> WEB
 
     %% 파일 시스템 볼륨 매핑
     LocalData <==>|Volume Mount : 데이터 영구보존| DB
     LocalData <==>|Volume Mount : n8n 설정 보존| Manager
-    LocalParser -->|Build COPY| WAS
-    LocalParser -->|Build COPY| WEB
     LocalParser <==>|Volume Mount : 실시간 파이썬 접근| Manager
 
-    %% 데이터 흐름 및 접근
-    User == "1. 브라우저 접속 (http://localhost:3000)" ==> WEB
-    WEB -- "2. API 요청 (Ajax/Fetch)" --> WAS
-    WAS -- "3. SQL 쿼리 (psycopg2)" --> DB
-    
     %% 관리자 데이터 파이프라인 트리거 (자동화)
-    Admin == "4. 워크플로우 및 스케줄 등록 (localhost:5678)" ==> Manager
-    Manager -- "5. 매일 정해진 스케줄(Cron)에 따라 <br> 컨테이너 내부에서 python main.py 실행" --> LocalParser
-    LocalParser -- "6. Dask 가공 후 DB 적재 (Bulk Insert)" --> DB
+    Admin == "1. 워크플로우 및 스케줄 등록 (localhost:5678)" ==> Manager
+    Manager -- "2. 매일 정해진 스케줄(Cron)에 따라 <br> 컨테이너 내부에서 python main.py 실행" --> LocalParser
+    LocalParser -- "3. 데이터 수집/가공 후 DB 적재 (Bulk Insert)" --> DB
 
     classDef container fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
     classDef storage fill:#334155,stroke:#10b981,stroke-width:2px,color:#fff;
     
-    class DB,WAS,WEB container;
+    class DB,Manager container;
     class LocalData,LocalParser storage;
 ```
 
@@ -144,21 +127,19 @@ sequenceDiagram
     deactivate Main
 ```
 
-### 3.2. 멀티 에이전트 시스템 (`agents/`)
-사용자가 웹사이트에서 종목을 검색하면, 두 에이전트가 협업하여 작동합니다.
-- **`AuditAgent` (`audit_agent.py`)**: 검색된 종목이 스팩(SPAC), ETF, 채권 등 불필요한 종목인지 실시간으로 검열합니다. 또한 생성된 프롬프트나 쿼리에 SQL 템플릿 주입 등의 보안 위협이 없는지 감시합니다.
-- **`PromptMakerAgent` (`prompt_maker_agent.py`)**: 검색된 종목의 최근 5일치 시계열 데이터를 PostgreSQL에서 가져온 뒤, LLM이 즉시 퀀트 분석을 시작할 수 있도록 컨텍스트가 부여된 메타 프롬프트를 자동으로 조립합니다.
+### 3.2. 보안 에이전트 및 추가 모듈 (`agents/`)
+시스템 내에는 데이터 파이프라인 및 메타 정보 생성 시 보안과 퀄리티를 유지하기 위한 에이전트가 존재할 수 있습니다.
+- **`AuditAgent` (`audit_agent.py`)**: 스팩(SPAC), ETF 등 불필요한 종목을 파이프라인 도중 필터링하고, DB에 저장될 쿼리에 취약점이 없는지 검사하는 역할을 담당합니다.
 
 ## 4. 실행 방법
 
-1. **Docker 컨테이너 동시 실행 (DB + API + WEB + Manager)**
+1. **Docker 컨테이너 동시 실행 (DB + Manager(n8n))**
    ```bash
    # 프로젝트 최상단 디렉토리에서 실행
    docker compose up -d --build
    ```
-   이후 `http://localhost:3000` 으로 접속하면 종목 검색용 웹 화면이 나타납니다.
 
 2. **자동 스케줄러(n8n) 접속 및 파이프라인 활성화**
    - 브라우저에서 `http://localhost:5678` 로 접속합니다.
    - n8n 워크플로우에 `Execute Command` 노드를 추가하고 `cd /app/Parser && python3 main.py`를 실행하도록 설정합니다. (또는 제공된 `n8n_workflow_template.json`을 Import)
-   - 스케줄 트리거를 설정해두면 관리자 개입 없이 매일 데이터가 백그라운드에서 적재됩니다.
+   - 스케줄 트리거를 설정해두면 관리자 개입 없이 매일 데이터가 백그라운드에서 자동 수집 및 적재됩니다.

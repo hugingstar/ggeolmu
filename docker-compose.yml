@@ -14,33 +14,7 @@ services:
     volumes:
       - ./Data/pgdata:/var/lib/postgresql/data
 
-  was:
-    build:
-      context: ./Parser
-      dockerfile: Dockerfile.was
-    container_name: ggeolmu_was
-    restart: always
-    ports:
-      - "8000:8000"
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=postgres
-      - DB_USER=postgres
-      - DB_PASS=postgres
-    depends_on:
-      - postgres
 
-  web:
-    build:
-      context: ./Parser
-      dockerfile: Dockerfile.web
-    container_name: ggeolmu_web
-    restart: always
-    ports:
-      - "3000:80"
-    depends_on:
-      - was
 
   manager:
     build:
