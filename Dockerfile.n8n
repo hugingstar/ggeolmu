@@ -1,0 +1,24 @@
+FROM n8nio/n8n:latest
+
+# 패키지 설치를 위해 root 유저로 전환
+USER root
+
+# Python 3 및 필수 빌드 패키지 설치 (PostgreSQL 드라이버 빌드용 포함)
+# n8n 최신 이미지는 Alpine을 주로 사용
+RUN apk update && apk add --no-cache \
+    python3 \
+    py3-pip \
+    build-base \
+    python3-dev \
+    postgresql-dev \
+    && ln -sf python3 /usr/bin/python || true
+
+# 파이프라인 필수 라이브러리 설치
+# 호스트의 requirements.txt를 복사
+COPY ./Parser/requirements.txt /tmp/requirements.txt
+
+# pip 설치 시 시스템 패키지 매니저 충돌 방지 
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt --break-system-packages || pip3 install --no-cache-dir -r /tmp/requirements.txt
+
+# n8n의 기본 실행 유저인 node 로 복구
+USER node

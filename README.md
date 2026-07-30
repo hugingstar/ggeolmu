@@ -25,6 +25,9 @@ flowchart TD
         %% DB Tier
         DB[("postgres:15-alpine <br> (Port: 5432)")]
         
+        %% Manager Tier (Scheduler)
+        Manager["manager (n8n) <br> (Port: 5678)"]
+
         %% WAS Tier (Backend)
         WAS["was (FastAPI) <br> (Port: 8000)"]
         
@@ -34,20 +37,23 @@ flowchart TD
 
     %% 실행 트리거 및 의존성 (depends_on)
     DB -. "1순위 구동" .-> WAS
+    DB -. "1순위 구동" .-> Manager
     WAS -. "2순위 구동" .-> WEB
 
     %% 파일 시스템 볼륨 매핑
     LocalData <==>|Volume Mount| DB
+    LocalData <==>|Volume Mount| Manager
     LocalParser -->|Build COPY| WAS
     LocalParser -->|Build COPY| WEB
+    LocalParser <==>|Volume Mount| Manager
 
     %% 데이터 흐름 및 접근
     User == "1. 브라우저 접속 (http://localhost:3000)" ==> WEB
     WEB -- "2. API 요청 (Ajax/Fetch)" --> WAS
     WAS -- "3. SQL 쿼리 (psycopg2)" --> DB
     
-    %% 관리자 데이터 파이프라인 트리거 (수동)
-    Admin == "수동 실행 (python main.py)" ==> LocalParser
+    %% 관리자 데이터 파이프라인 트리거 (자동화)
+    Manager -- "정해진 스케줄(Cron)에 따라 <br> python main.py 실행" --> LocalParser
     LocalParser -- "Dask 가공 후 DB 적재 (Bulk Insert)" --> DB
 
     classDef container fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
@@ -97,19 +103,19 @@ erDiagram
 - **`queries/` 디렉토리**: SQL 인젝션 공격 방지를 위해 쿼리를 독립된 파일(`001_`, `002_`, `003_`)로 분리 관리
 
 #### 📊 파이프라인 데이터 흐름 시퀀스
-아래는 수동으로 파이프라인이 트리거되었을 때 데이터가 어떻게 수집되고 가공되어 최종적으로 데이터베이스에 들어가는지를 보여줍니다.
+아래는 n8n 스케줄러가 정해진 시간에 파이프라인을 자동 트리거했을 때, 데이터가 어떻게 수집되고 가공되어 최종적으로 데이터베이스에 들어가는지를 보여줍니다.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Admin as 관리자 (Admin)
+    actor N8N as n8n (Manager Tier)
     participant Main as main.py (Pipeline)
     participant FDR as get_fdr.py (수집)
     participant Dask as Dask Processor (가공)
     participant DBManager as db_manager.py
     participant DB as PostgreSQL (DB)
 
-    Admin->>Main: 파이프라인 실행 요청 (python main.py)
+    N8N->>Main: 매일 지정된 시간 파이프라인 자동 실행
     activate Main
     Main->>FDR: 1단계: 종목 데이터 수집 명령
     activate FDR
@@ -139,16 +145,14 @@ sequenceDiagram
 
 ## 4. 실행 방법
 
-1. **Docker 컨테이너 동시 실행 (DB + API + 웹)**
+1. **Docker 컨테이너 동시 실행 (DB + API + WEB + Manager)**
    ```bash
    # 프로젝트 최상단 디렉토리에서 실행
    docker compose up -d --build
    ```
-   이후 `http://localhost:3000` 으로 접속하면 종목 검색용 Glassmorphism UI 웹 화면이 나타납니다.
+   이후 `http://localhost:3000` 으로 접속하면 종목 검색용 웹 화면이 나타납니다.
 
-2. **데이터 파이프라인 트리거 (데이터 적재)**
-   ```bash
-   cd Parser
-   python main.py
-   ```
-   스케줄러 또는 관리자가 위 명령어를 실행하면, 종목 시세 데이터를 수집한 후 백그라운드 DB로 밀어 넣습니다.
+2. **자동 스케줄러(n8n) 접속 및 파이프라인 활성화**
+   - 브라우저에서 `http://localhost:5678` 로 접속합니다.
+   - n8n 워크플로우에 `Execute Command` 노드를 추가하고 `cd /app/Parser && python3 main.py`를 실행하도록 설정합니다. (또는 제공된 `n8n_workflow_template.json`을 Import)
+   - 스케줄 트리거를 설정해두면 관리자 개입 없이 매일 데이터가 백그라운드에서 적재됩니다.
