@@ -1,0 +1,7 @@
+finance-datareader
+dask[dataframe]
+dask[distributed]
+pandas
+numpy
+ta
+scipy

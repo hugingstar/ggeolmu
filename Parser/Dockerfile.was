@@ -1,0 +1,13 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+# 필요 패키지 설치
+RUN pip install fastapi uvicorn pydantic psycopg2-binary pandas dask
+
+# 상위 폴더(Parser)의 내용 복사 (app.py 뿐만 아니라 db_manager, agents 모듈 필요)
+COPY . /app
+
+EXPOSE 8000
+
+# app.py 실행
+CMD ["uvicorn", "was_app.app:app", "--host", "0.0.0.0", "--port", "8000"]

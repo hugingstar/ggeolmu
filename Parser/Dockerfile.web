@@ -1,0 +1,9 @@
+FROM nginx:alpine
+
+# 기존 Nginx 기본 설정 삭제 후 정적 파일 복사
+RUN rm -rf /usr/share/nginx/html/*
+COPY web_static /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
