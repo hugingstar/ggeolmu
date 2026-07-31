@@ -2,7 +2,6 @@ import os
 import json
 from datetime import datetime, timedelta
 import pytz
-from apscheduler.schedulers.blocking import BlockingScheduler
 
 # ======================================================================
 # [핵심 수정 사항] Matplotlib 백엔드 강제 변경 (Tkinter 스레드 에러 방지)
@@ -26,12 +25,11 @@ from process_c1 import get_kospi200_dask_data as run_process_c1
 from process_c2 import run_cluster
 
 class FinancePipeline:
-    def __init__(self, base_path: str, s3_bucket: str):
+    def __init__(self, base_path: str):
         """
         파이프라인 실행에 필요한 공통 환경 및 설정값을 초기화합니다.
         """
         self.base_path = base_path
-        self.s3_bucket = s3_bucket
         self.kst = pytz.timezone('Asia/Seoul')
         
         # 클러스터링 제외 단어 리스트
@@ -344,15 +342,6 @@ class FinancePipeline:
                         df['Method'] = method_name
                         db.upsert_clustering_results(df)
 
-    def _print_waiting_message(self):
-        """작업 완료 후 또는 시작 시 스케줄러 대기 상태를 알리는 메시지"""
-        print(f"\n{'='*60}")
-        print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] 스케줄러 대기 중... 다음 작업을 기다립니다.")
-        print("- KOSPI, KOSDAQ : 월~금 16:05 (KST)")
-        print("- NASDAQ, NYSE  : 화~토 06:40 (KST)")
-        print("종료하려면 Ctrl+C를 누르세요.")
-        print(f"{'='*60}\n")
-
     def run_kr_markets(self):
         """국내 시장(KOSPI, KOSDAQ) 자동 태스크 - 병렬 최적화 구조"""
         print("국내 시장(KOSPI, KOSDAQ) 자동 태스크를 기동합니다.")
@@ -365,7 +354,6 @@ class FinancePipeline:
             self.execute_clustering_pipeline(market)
             
         print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] 국내 시장 통합 파이프라인 전체 완료")
-        self._print_waiting_message()
 
     def run_us_markets(self):
         """미국 시장(NASDAQ, NYSE) 자동 태스크 - 병렬 최적화 구조"""
@@ -379,38 +367,6 @@ class FinancePipeline:
             self.execute_clustering_pipeline(market)
             
         print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] 미국 시장 통합 파이프라인 전체 완료")
-        self._print_waiting_message()
-
-    def run_scheduler(self):
-        """스케줄러 설정 및 메인 루프 실행"""
-        scheduler = BlockingScheduler(timezone=self.kst)
-
-        # 1. 한국시간 기준 월 ~ 금 16:05 -> KOSPI, KOSDAQ 실행
-        scheduler.add_job(
-            self.run_kr_markets, 
-            trigger='cron', 
-            day_of_week='mon-fri', 
-            hour=16, 
-            minute=5
-        )
-
-        # 2. 한국시간 기준 화 ~ 토 06:05 -> NASDAQ, NYSE 실행
-        scheduler.add_job(
-            self.run_us_markets, 
-            trigger='cron', 
-            day_of_week='tue-sat', 
-            hour=6, 
-            minute=5
-        )
-
-
-        print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] 통합 파이프라인 스케줄러가 정상 가동되었습니다.")
-        self._print_waiting_message()
-        
-        try:
-            scheduler.start()
-        except (KeyboardInterrupt, SystemExit):
-            print("\n스케줄러가 안전하게 종료되었습니다.")
 
 
 # ======================================================================
@@ -418,16 +374,16 @@ class FinancePipeline:
 # ======================================================================
 if __name__ == "__main__":
     import os
-    # 저장 경로를 ggeolmu/Data로 변경
-    BASE_PATH = "/Users/yusunglee/PycharmProjects/ggeolmu/Data"
-    S3_BUCKET_NAME = "yslee-s3-bucket"
+    
+    # 저장 경로를 프로젝트 내부 Data 폴더로 설정 (OS 무관 상대 경로)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    BASE_PATH = os.path.join(project_root, "Data")
     
     if not os.path.exists(BASE_PATH):
         os.makedirs(BASE_PATH)
     
-    pipeline = FinancePipeline(base_path=BASE_PATH, s3_bucket=S3_BUCKET_NAME)
+    pipeline = FinancePipeline(base_path=BASE_PATH)
     
     print("==== 🚀 데이터 즉시 수집 및 파이프라인 가동 ====")
-    # 스케줄러 없이 즉시 실행되도록 변경
     pipeline.run_kr_markets()
     pipeline.run_us_markets()
