@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+Data/pgdata/
+Data/KOSDAQ/
+Data/KOSPI/
+Data/NASDAQ/
+Data/NYSE/
+.env

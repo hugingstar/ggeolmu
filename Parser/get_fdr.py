@@ -16,10 +16,10 @@ import random
 #   - fdr_prefix : 최신 fdr 규칙에 맞는 시장 접두어 (예: NAVER)
 # ---------------------------------------------------------------------------
 MARKET_CONFIG = {
-    "KOSPI":  {"file": "kospi_list.csv",  "encoding": "utf-8-sig", "code_col": "Code",   "pad_zero": True,  "fdr_prefix": "NAVER"},
-    "KOSDAQ": {"file": "kosdaq_list.csv", "encoding": "utf-8-sig", "code_col": "Code",   "pad_zero": True,  "fdr_prefix": "NAVER"},
-    "NYSE":   {"file": "nyse_list.csv",   "encoding": "utf-8-sig", "code_col": "Symbol", "pad_zero": False, "fdr_prefix": None},
-    "NASDAQ": {"file": "nasdaq_list.csv", "encoding": "utf-8-sig", "code_col": "Symbol", "pad_zero": False, "fdr_prefix": None},
+    "KOSPI":  {"file": "kospi_list.parquet",  "encoding": "utf-8-sig", "code_col": "Code",   "pad_zero": True,  "fdr_prefix": "NAVER"},
+    "KOSDAQ": {"file": "kosdaq_list.parquet", "encoding": "utf-8-sig", "code_col": "Code",   "pad_zero": True,  "fdr_prefix": "NAVER"},
+    "NYSE":   {"file": "nyse_list.parquet",   "encoding": "utf-8-sig", "code_col": "Symbol", "pad_zero": False, "fdr_prefix": None},
+    "NASDAQ": {"file": "nasdaq_list.parquet", "encoding": "utf-8-sig", "code_col": "Symbol", "pad_zero": False, "fdr_prefix": None},
 }
 
 
@@ -52,10 +52,13 @@ def load_stock_list_from_csv(market_name):
         else:
             raise FileNotFoundError(f"종목 리스트 파일을 찾을 수 없습니다: {file_path}")
 
-    try:
-        df = pd.read_csv(file_path, encoding=cfg["encoding"])
-    except UnicodeDecodeError:
-        df = pd.read_csv(file_path, encoding="utf-8-sig")
+    if file_path.endswith('.parquet'):
+        df = pd.read_parquet(file_path)
+    else:
+        try:
+            df = pd.read_csv(file_path, encoding=cfg["encoding"])
+        except UnicodeDecodeError:
+            df = pd.read_csv(file_path, encoding="utf-8-sig")
 
     if cfg["code_col"] != "Symbol":
         df = df.rename(columns={cfg["code_col"]: "Symbol"})

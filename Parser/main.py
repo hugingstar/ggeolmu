@@ -7,6 +7,10 @@ import pytz
 # External Module Pipeline Import
 # ======================================================================
 import pandas as pd
+from dask.diagnostics import ProgressBar
+
+# 전체 파이프라인에서 Dask 병렬 처리 진행률을 눈으로 볼 수 있게 프로그레스 바를 켭니다.
+ProgressBar().register()
 
 from get_fdr import get_kospi200_dask_data
 from process_a1 import DaskFinanceProcessor
@@ -69,7 +73,7 @@ class FinancePipeline:
         print(f"\n{'='*60}\n[{now.strftime('%Y-%m-%d %H:%M:%S')}] {market} 1~4단계 파이프라인 (데이터 가공) 시작\n{'='*60}")
         
         # 1단계: 데이터 취득
-        print(f"[*] 1단계: {market} Raw 데이터 수집 중...")
+        print(f"[*] 1단계: {market} Raw 데이터 수집 중... (종목 수가 많아 수 분 정도 소요될 수 있으며, 아래에 프로그레스 바가 표시됩니다)")
         get_kospi200_dask_data(
             start_date="2000-01-01",
             num_stocks=4000,
@@ -99,7 +103,7 @@ class FinancePipeline:
             print(f"[Error] DB 적재 중 오류 발생: {e}")
 
         # 2단계: 데이터 가공
-        print(f"[*] 2단계: {market} 기술적 지표 병렬 가공 시작...")
+        print(f"[*] 2단계: {market} 기술적 지표 병렬 가공 시작... (보조지표 계산 중, 프로그레스 바 표시됨)")
         config_a1 = {
             "input_path": self.base_path,
             "output_path": self.base_path,
@@ -130,7 +134,7 @@ class FinancePipeline:
         # 6단계: C1 Process (Z-Score 및 통계 데이터 생성)
         # [수정] start_date를 today_date 기준 365일 전으로 설정
         start_date_365d = (now - timedelta(days=180)).strftime('%Y-%m-%d')
-        print(f"[*] 6단계: {market} C1 Process (Z-Score 및 주기별 통계 데이터 분산 처리)... (시작일: {start_date_365d})")
+        print(f"[*] 6단계: {market} C1 Process (Z-Score 및 주기별 통계 데이터 분산 처리)... (시작일: {start_date_365d}, 프로그레스 바 표시됨)")
         run_process_c1(
             start_date=start_date_365d,  
             end_date=today_date,
@@ -181,8 +185,8 @@ class FinancePipeline:
 
 
     def _run_clustering(self, market: str, config_c2: dict):
-        """내부 메서드: 시가총액 필터링 및 클러스터링 실행 (DB에서 쿼리 조회)"""
-        print(f"Loading Market Cap Data from DB...")
+        """내부 메서드: 시가총액 필터링 및 클러스터링 실행 (DB 조회, 실패 시 로컬 파일로 폴백)"""
+        print(f"Loading Market Cap Data...")
         from db_manager import DBManager
         db = DBManager()
         
@@ -190,7 +194,18 @@ class FinancePipeline:
         df_cap = db.read_query("select_market_cap", params=(config_c2['TARGET_DATE'],))
         
         if df_cap.empty:
-            raise ValueError(f"에러: {config_c2['TARGET_DATE']} 일자의 시가총액 데이터를 DB에서 찾을 수 없습니다.")
+            import os
+            cap_path = config_c2.get('CAP_PATH')
+            if cap_path and os.path.exists(cap_path):
+                print(f"[Fallback] DB가 비어있거나 연결 실패. 로컬 CSV 파일에서 시가총액 데이터를 읽어옵니다: {cap_path}")
+                df_cap = pd.read_csv(cap_path)
+                df_cap.columns = [c.lower() for c in df_cap.columns]
+                if 'symbol' not in df_cap.columns and 'code' in df_cap.columns:
+                    df_cap['symbol'] = df_cap['code']
+                if 'market_cap_krw' not in df_cap.columns and 'marketcap_krw' in df_cap.columns:
+                    df_cap['market_cap_krw'] = df_cap['marketcap_krw']
+            else:
+                raise ValueError(f"에러: {config_c2['TARGET_DATE']} 일자의 시가총액 데이터를 DB 및 로컬 파일({cap_path}) 모두에서 찾을 수 없습니다.")
 
         cap_col = config_c2['CAP_COLUMN'].lower() # sql returns lowercase columns
         if cap_col not in df_cap.columns:
@@ -210,7 +225,7 @@ class FinancePipeline:
 
         print(f"[필터링 결과] 제외 단어 필터링 후 시가총액 상위 {config_c2['TOP_N']} 종목 추출 완료 (실제 크기: {len(filtered_symbols)}개)")
 
-        print(f"Loading Time-Series Data from DB...")
+        print(f"Loading Time-Series Data...")
         # C1 데이터 (Z-Score 1w) 조회 (최근 180일)
         target_date_obj = datetime.strptime(config_c2['TARGET_DATE'], '%Y-%m-%d')
         start_dt = target_date_obj - timedelta(days=180)
@@ -218,8 +233,30 @@ class FinancePipeline:
         df_zscore_raw = db.read_query("select_zscore_features", params=('1w', start_dt.strftime('%Y-%m-%d')))
         
         if df_zscore_raw.empty:
-            print("DB에서 Z-Score 데이터를 찾지 못하여 클러스터링을 중단합니다.")
-            return
+            import os
+            zscore_path = config_c2.get('LOAD_PATH')
+            if zscore_path and os.path.exists(zscore_path):
+                print(f"[Fallback] DB가 비어있거나 연결 실패. 로컬 CSV 파일에서 Z-Score 데이터를 읽어옵니다: {zscore_path}")
+                df_zscore_csv = pd.read_csv(zscore_path)
+                
+                date_col = None
+                for col in ['Date', 'date', 'Unnamed: 0']:
+                    if col in df_zscore_csv.columns:
+                        date_col = col
+                        break
+                
+                if date_col:
+                    if date_col != 'Date':
+                        df_zscore_csv = df_zscore_csv.rename(columns={date_col: 'Date'})
+                else:
+                    df_zscore_csv = df_zscore_csv.reset_index().rename(columns={'index': 'Date'})
+                
+                df_zscore_raw = df_zscore_csv.melt(id_vars=['Date'], var_name='Symbol', value_name='ZScore')
+                df_zscore_raw.columns = ['date', 'symbol', 'zscore']
+                df_zscore_raw = df_zscore_raw[df_zscore_raw['date'] >= start_dt.strftime('%Y-%m-%d')]
+            else:
+                print("DB 및 로컬 파일에서 Z-Score 데이터를 찾지 못하여 클러스터링을 중단합니다.")
+                return
 
         # Pivot the dataframe so that columns are symbols and index is date
         df_zscore_pivot = df_zscore_raw.pivot_table(index='date', columns='symbol', values='zscore')
@@ -332,10 +369,16 @@ class FinancePipeline:
         markets = ["KOSPI", "KOSDAQ"]
         
         for market in markets:
-            self.execute_data_pipeline(market)
+            try:
+                self.execute_data_pipeline(market)
+            except Exception as e:
+                print(f"[ERROR] {market} 데이터 수집 중 에러 발생: {e}")
             
         for market in markets:
-            self.execute_clustering_pipeline(market)
+            try:
+                self.execute_clustering_pipeline(market)
+            except Exception as e:
+                print(f"[ERROR] {market} 클러스터링 실행 중 에러 발생: {e}")
             
         print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] 국내 시장 통합 파이프라인 전체 완료")
 
@@ -345,10 +388,16 @@ class FinancePipeline:
         markets = ["NASDAQ", "NYSE"]
         
         for market in markets:
-            self.execute_data_pipeline(market)
+            try:
+                self.execute_data_pipeline(market)
+            except Exception as e:
+                print(f"[ERROR] {market} 데이터 수집 중 에러 발생: {e}")
             
         for market in markets:
-            self.execute_clustering_pipeline(market)
+            try:
+                self.execute_clustering_pipeline(market)
+            except Exception as e:
+                print(f"[ERROR] {market} 클러스터링 실행 중 에러 발생: {e}")
             
         print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] 미국 시장 통합 파이프라인 전체 완료")
 

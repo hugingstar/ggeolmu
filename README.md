@@ -86,8 +86,8 @@ flowchart TD
 erDiagram
     RAW_STOCK_DATA {
       int id PK
-      date date "NOT NULL (수집일)"
-      varchar symbol "NOT NULL (종목코드)"
+      date date "UK (수집일)"
+      varchar symbol "UK (종목코드)"
       varchar name "종목명"
       numeric open "시가"
       numeric high "고가"
@@ -105,7 +105,31 @@ erDiagram
       timestamp created_at "생성 일시"
     }
 
+    MARKET_CAP {
+      date date PK
+      varchar symbol PK
+      numeric market_cap_krw "시가총액(원)"
+    }
+
+    ZSCORE_FEATURES {
+      date date PK
+      varchar symbol PK
+      varchar freq PK "주기 (1d, 1w, 1m)"
+      numeric zscore "Z-Score"
+    }
+
+    CLUSTERING_RESULTS {
+      date target_date PK "기준일"
+      varchar symbol PK "종목코드"
+      varchar method PK "클러스터링 기법"
+      varchar market "시장 (KOSPI 등)"
+      int cluster_id "소속 군집 번호"
+    }
+
     RAW_STOCK_DATA ||--o{ PROMPT_LOGS : "기반으로 메타프롬프트 분석"
+    RAW_STOCK_DATA ||--|| MARKET_CAP : "일별 시가총액"
+    RAW_STOCK_DATA ||--o{ ZSCORE_FEATURES : "주기별 Z-Score 지표"
+    RAW_STOCK_DATA ||--o{ CLUSTERING_RESULTS : "군집화 결과"
 ```
 
 ---

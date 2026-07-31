@@ -130,4 +130,112 @@ class DBManager:
             print(f"[DBManager] Write query failed: {e}")
             return False
 
+    def read_query(self, query_name_or_str: str, params: tuple = None) -> pd.DataFrame:
+        """
+        주어진 쿼리나 이름을 실행하고 결과를 pandas DataFrame으로 반환합니다.
+        """
+        if not self.conn:
+            return pd.DataFrame()
+            
+        if query_name_or_str == "select_market_cap":
+            query = "SELECT symbol, market_cap_krw FROM public.market_cap WHERE date = %s"
+        elif query_name_or_str == "select_zscore_features":
+            query = "SELECT date, symbol, zscore FROM public.zscore_features WHERE freq = %s AND date >= %s"
+        else:
+            query = self.queries.get(query_name_or_str, query_name_or_str)
+            
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(query, params)
+                if cur.description:
+                    columns = [desc[0] for desc in cur.description]
+                    data = cur.fetchall()
+                    return pd.DataFrame(data, columns=columns)
+                return pd.DataFrame()
+        except Exception as e:
+            print(f"[DBManager] read_query failed: {e}")
+            return pd.DataFrame()
+
+    def upsert_market_cap(self, df: pd.DataFrame):
+        if not self.conn or df.empty:
+            return
+            
+        df_clean = df.where(pd.notnull(df), None)
+        records = []
+        for _, row in df_clean.iterrows():
+            d = row.get('Date')
+            sym = row.get('Symbol', row.get('Code'))
+            cap = row.get('MarketCap_KRW', row.get('market_cap_krw'))
+            if pd.isna(cap):
+                cap = None
+            records.append((d, sym, cap))
+            
+        query = """
+        INSERT INTO public.market_cap (date, symbol, market_cap_krw)
+        VALUES %s
+        ON CONFLICT (date, symbol) DO UPDATE SET
+            market_cap_krw = EXCLUDED.market_cap_krw
+        """
+        try:
+            with self.conn.cursor() as cur:
+                execute_values(cur, query, records, page_size=1000)
+                print(f"[DBManager] Upserted {len(records)} market_cap records.")
+        except Exception as e:
+            print(f"[DBManager] upsert_market_cap failed: {e}")
+
+    def upsert_zscore_features(self, df: pd.DataFrame, freq: str):
+        if not self.conn or df.empty:
+            return
+            
+        df_clean = df.where(pd.notnull(df), None)
+        records = []
+        for _, row in df_clean.iterrows():
+            d = row.get('Date')
+            sym = row.get('Symbol', row.get('Code'))
+            zs = row.get('ZScore', row.get('zscore'))
+            if pd.isna(zs):
+                zs = None
+            records.append((d, sym, freq, zs))
+            
+        query = """
+        INSERT INTO public.zscore_features (date, symbol, freq, zscore)
+        VALUES %s
+        ON CONFLICT (date, symbol, freq) DO UPDATE SET
+            zscore = EXCLUDED.zscore
+        """
+        try:
+            with self.conn.cursor() as cur:
+                execute_values(cur, query, records, page_size=1000)
+                print(f"[DBManager] Upserted {len(records)} zscore_features records for {freq}.")
+        except Exception as e:
+            print(f"[DBManager] upsert_zscore_features failed: {e}")
+
+    def upsert_clustering_results(self, df: pd.DataFrame):
+        if not self.conn or df.empty:
+            return
+            
+        df_clean = df.where(pd.notnull(df), None)
+        records = []
+        for _, row in df_clean.iterrows():
+            td = row.get('TargetDate')
+            mkt = row.get('Market')
+            sym = row.get('Symbol', row.get('Code'))
+            cid = row.get('Cluster_ID', row.get('Cluster'))
+            method = row.get('Method')
+            records.append((td, mkt, sym, cid, method))
+            
+        query = """
+        INSERT INTO public.clustering_results (target_date, market, symbol, cluster_id, method)
+        VALUES %s
+        ON CONFLICT (target_date, symbol, method) DO UPDATE SET
+            market = EXCLUDED.market,
+            cluster_id = EXCLUDED.cluster_id
+        """
+        try:
+            with self.conn.cursor() as cur:
+                execute_values(cur, query, records, page_size=1000)
+                print(f"[DBManager] Upserted {len(records)} clustering_results records.")
+        except Exception as e:
+            print(f"[DBManager] upsert_clustering_results failed: {e}")
+
 

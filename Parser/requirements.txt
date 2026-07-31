@@ -5,3 +5,13 @@ pandas
 numpy
 ta
 scipy
+yfinance
+beautifulsoup4
+requests
+pytz
+psycopg2-binary
+scikit-learn
+tslearn
+matplotlib
+fastapi
+uvicorn
