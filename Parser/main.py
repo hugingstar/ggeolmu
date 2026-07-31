@@ -4,20 +4,12 @@ from datetime import datetime, timedelta
 import pytz
 
 # ======================================================================
-# [핵심 수정 사항] Matplotlib 백엔드 강제 변경 (Tkinter 스레드 에러 방지)
-# 주의: 이 코드는 반드시 데이터 처리 모듈들이 import 되기 전에 실행되어야 합니다.
-# ======================================================================
-import matplotlib
-matplotlib.use('Agg')
-
-# ======================================================================
 # External Module Pipeline Import
 # ======================================================================
 import pandas as pd
 
 from get_fdr import get_kospi200_dask_data
 from process_a1 import DaskFinanceProcessor
-from process_b1 import MakeSheet
 
 from process_m1_cap import run_process
 # process_c1의 함수를 이름 충돌 방지를 위해 run_process_c1으로 가져옵니다.
@@ -117,16 +109,8 @@ class FinancePipeline:
         processor.run()
         # self._upsert_a1(market) # (기존 함수 존재 가정)
         
-        # 3단계: 날짜별 시트 생성
-        print(f"[*] 3단계: {market} 시그널별 날짜 시트 생성 시작...")
-        config_b1 = {
-            "start_date": start_date_5d,  # start_date_5d
-            "end_date": today_date,       
-            "output_path": self.base_path,
-            "market_name": market
-        }
-        app = MakeSheet(config_b1)
-        app.run()
+        # 3단계: 날짜별 시트 생성 (MakeSheet 제거됨, DB에 직접 의존)
+        print(f"[*] 3단계: {market} 시그널별 날짜 시트 생성 단계 생략 (DB 직결)...")
         # self._upsert_b1(market, now, start_date_5d)
         
         print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] {market} 1~4단계 파이프라인 완료")
