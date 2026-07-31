@@ -7,39 +7,76 @@ n8n과 같은 무거운 스케줄러 관리 툴 없이, 로컬 Python 환경 및
 
 ---
 
-## 2. 시스템 아키텍처 및 데이터 흐름
+## 2. 시스템 아키텍처 및 데이터 파이프라인 흐름
 
-시스템은 데이터 보존용 DB 컨테이너와 정적 웹 UI 및 API 서버 역할을 병행하는 FastAPI WAS 서버의 2-Tier 구조를 따릅니다.
+시스템은 데이터 보존용 DB 컨테이너와 정적 웹 UI 및 API 서버 역할을 병행하는 FastAPI WAS 서버의 2-Tier 구조를 따르며, 전체 데이터 흐름 및 단계별 모듈은 아래와 같습니다.
 
 ```mermaid
 flowchart TD
-    %% 사용자 및 로컬 호스트
-    User(("사용자 (Browser)"))
-    Admin(("관리자 (CLI)"))
-    
-    subgraph Host ["Host Machine (Local)"]
-        LocalData[/"./Data/pgdata"/]
-        LocalParser[/"./Parser (Source Code)"/]
+    %% 스타일 정의
+    classDef source fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef process fill:#0f172a,stroke:#8b5cf6,stroke-width:2px,color:#fff;
+    classDef storage fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#fff;
+    classDef agent fill:#701a75,stroke:#d946ef,stroke-width:2px,color:#fff;
+
+    %% 1단계: 수집 및 DB 적재
+    subgraph DataScraping ["1단계: 데이터 수집 & 적재 (Ingestion)"]
+        FDR[("FinanceDataReader <br> (KOSPI, KOSDAQ, NASDAQ, NYSE)")]
+        MainPy["python main.py <br> (Pipeline Controller)"]
+        RawParquet[/"Raw Parquet Files"/]
+        DB_Raw[("PostgreSQL <br> public.raw_stock_data")]
+        
+        FDR -->|1. 주가 수집| MainPy
+        MainPy -->|2. 임시 보존| RawParquet
+        RawParquet -->|3. UPSERT Bulk Insert| DB_Raw
     end
 
-    %% 도커 네트워크 내부
-    subgraph DockerNetwork ["Docker Defaults"]
-        DB[("postgres:15-alpine <br> (Port: 5432) <br> * 데이터 저장소")]
+    %% 2단계: 가공 및 지표 생성
+    subgraph FeatureEngineering ["2단계: 지표 가공 & 시그널 생성 (Dask)"]
+        DaskA1["process_a1.py <br> (기술적 지표 계산)"]
+        DaskB1["process_b1.py <br> (시그널 분석 시트 생성)"]
+        
+        DB_Raw -->|4. 데이터 가공 리드| DaskA1
+        DaskA1 -->|5. 시그널 추출| DaskB1
+        DaskB1 -->|6. 기술 분석 데이터 저장| DB_Raw
     end
 
-    %% 웹/API 서버 (FastAPI)
-    FastAPI["FastAPI Web Server <br> (Port: 8000) <br> * API 제공 & SPA 정적 서빙"]
+    %% 3단계: 분석 및 클러스터링
+    subgraph AnalyticsClustering ["3단계: 고급 분석 & 시계열 클러스터링"]
+        M1_Cap["process_m1_cap.py <br> (시가총액 데이터 추출)"]
+        C1_ZScore["process_c1.py <br> (1d/1w/1m Z-Score 계산)"]
+        C2_Clustering["process_c2.py <br> (K-Means SoftDTW 클러스터링)"]
+        
+        DB_Raw -->|7. 기초 데이터 제공| M1_Cap
+        M1_Cap -->|8. 주기별 가공| C1_ZScore
+        C1_ZScore -->|9. Top 1000 종목 시계열 패턴화| C2_Clustering
+        C2_Clustering -->|10. 군집 레이블 저장| DB_Raw
+    end
 
-    %% 볼륨 매핑
-    LocalData <==>|Volume Mount : 데이터 영구보존| DB
+    %% 4단계: 프론트 웹 서비스 및 멀티 에이전트
+    subgraph WebService ["4단계: 웹 서비스 & Multi-Agent 분석 (SPA UI)"]
+        Browser[/"사용자 브라우저 (SPA Router)"/]
+        FastAPI["FastAPI Web Server <br> (app.py)"]
+        AuditAgent["AuditAgent <br> (SPAC/ETF 필터 & SQLi 차단)"]
+        PromptAgent["PromptMakerAgent <br> (최근 5일 데이터 프롬프트화)"]
+        DB_Logs[("PostgreSQL <br> public.prompt_logs")]
 
-    %% 실행 및 요청 관계
-    User == "1. 웹사이트 접속 (localhost:8000)" ==> FastAPI
-    FastAPI -- "2. 데이터 조회 및 감사 로그 기록" --> DB
-    
-    Admin == "로컬 데이터 수집 실행 <br> (python Parser/main.py)" ==> LocalParser
-    LocalParser -- "3. 종목 스크랩 및 DB UPSERT" --> DB
+        Browser -->|11. 종목 검색 / Route 이동| FastAPI
+        FastAPI -->|12. 입력어 1차 검사| AuditAgent
+        AuditAgent -->|13. PASS 시 메타데이터 조회| PromptAgent
+        PromptAgent -->|14. 5일 요약 데이터 추출| DB_Raw
+        PromptAgent -->|15. 최종 프롬프트 생성| FastAPI
+        FastAPI -->|16. 검사 상태 및 프롬프트 기록| DB_Logs
+        FastAPI -->|17. 차트 & 분석 콘솔 렌더링| Browser
+    end
+
+    %% 클래스 지정
+    class FDR source;
+    class MainPy,DaskA1,DaskB1,M1_Cap,C1_ZScore,C2_Clustering,FastAPI process;
+    class DB_Raw,DB_Logs,RawParquet storage;
+    class AuditAgent,PromptAgent agent;
 ```
+
 
 ### 2.1 개체 관계도 (ER Diagram)
 
