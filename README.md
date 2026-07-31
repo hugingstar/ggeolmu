@@ -1,145 +1,110 @@
 # 🤖 Ggeolmu Multi-Agent Stock Parser & Analyzer
 
 ## 1. 개요
-`Ggeolmu Parser` 모듈은 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집하고 가공하여 **PostgreSQL 데이터베이스에 적재**하는 핵심 데이터 파이프라인입니다. 
-웹이나 WAS 등 불필요한 레이어를 제거하고, 오직 **n8n 매니저**를 통해 파이프라인 코드를 스케줄링하고 자동화하는 간소화된 구조를 채택했습니다.
+`Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집하고 가공하여 **PostgreSQL 데이터베이스에 적재**하고, 이를 시각화하여 멀티 에이전트(Multi-Agent) 기반의 맞춤형 분석 프롬프트를 조회할 수 있는 **주식 검색 Single Page Application (SPA) 웹 서비스**입니다.
 
-## 2. 시스템 아키텍처 및 도커 환경
+n8n과 같은 무거운 스케줄러 관리 툴 없이, 로컬 Python 환경 및 Docker 기반 데이터베이스와 FastAPI 단독 서비스로 결합하여 최적화된 구동 방식을 지원합니다.
 
-시스템은 파이프라인 실행과 적재에 최적화된 2-Tier 아키텍처(Manager, DB) 구조를 따르며, `docker compose up -d --build` 명령어를 통해 손쉽게 로컬에서 전체 환경을 기동할 수 있습니다.
+---
+
+## 2. 시스템 아키텍처 및 데이터 흐름
+
+시스템은 데이터 보존용 DB 컨테이너와 정적 웹 UI 및 API 서버 역할을 병행하는 FastAPI WAS 서버의 2-Tier 구조를 따릅니다.
 
 ```mermaid
 flowchart TD
     %% 사용자 및 로컬 호스트
-    Admin(("파이프라인 관리자"))
+    User(("사용자 (Browser)"))
+    Admin(("관리자 (CLI)"))
     
-    subgraph Host ["Host Machine (Mac/PC)"]
+    subgraph Host ["Host Machine (Local)"]
         LocalData[/"./Data/pgdata"/]
         LocalParser[/"./Parser (Source Code)"/]
     end
 
     %% 도커 네트워크 내부
-    subgraph DockerNetwork ["Docker Internal Network (ggeolmu_default)"]
-        %% Manager Tier (Scheduler & Workflow)
-        Manager["manager (n8n) <br> (Port: 5678) <br> * 워크플로우 엔진 & 실행 환경"]
-        
-        %% DB Tier
+    subgraph DockerNetwork ["Docker Defaults"]
         DB[("postgres:15-alpine <br> (Port: 5432) <br> * 데이터 저장소")]
     end
 
-    %% 실행 트리거 및 의존성 (depends_on)
-    DB -. "1순위 구동" .-> Manager
+    %% 웹/API 서버 (FastAPI)
+    FastAPI["FastAPI Web Server <br> (Port: 8000) <br> * API 제공 & SPA 정적 서빙"]
 
-    %% 파일 시스템 볼륨 매핑
+    %% 볼륨 매핑
     LocalData <==>|Volume Mount : 데이터 영구보존| DB
-    LocalData <==>|Volume Mount : n8n 설정 보존| Manager
-    LocalParser <==>|Volume Mount : 실시간 파이썬 접근| Manager
 
-    %% 관리자 데이터 파이프라인 트리거 (자동화)
-    Admin == "1. 워크플로우 및 스케줄 등록 (localhost:5678)" ==> Manager
-    Manager -- "2. 매일 정해진 스케줄(Cron)에 따라 <br> 컨테이너 내부에서 python main.py 실행" --> LocalParser
-    LocalParser -- "3. 데이터 수집/가공 후 DB 적재 (Bulk Insert)" --> DB
-
-    classDef container fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
-    classDef storage fill:#334155,stroke:#10b981,stroke-width:2px,color:#fff;
+    %% 실행 및 요청 관계
+    User == "1. 웹사이트 접속 (localhost:8000)" ==> FastAPI
+    FastAPI -- "2. 데이터 조회 및 감사 로그 기록" --> DB
     
-    class DB,Manager container;
-    class LocalData,LocalParser storage;
+    Admin == "로컬 데이터 수집 실행 <br> (python Parser/main.py)" ==> LocalParser
+    LocalParser -- "3. 종목 스크랩 및 DB UPSERT" --> DB
 ```
 
 ### 2.1 개체 관계도 (ER Diagram)
 
-시스템 내 데이터베이스(PostgreSQL)의 주요 테이블 구조와 논리적 관계입니다.
+데이터베이스(PostgreSQL)의 주요 테이블 구조와 관계입니다.
 
 ```mermaid
 erDiagram
     RAW_STOCK_DATA {
-        int id PK
-        date date "NOT NULL (수집일)"
-        varchar symbol "NOT NULL (종목코드)"
-        varchar name "종목명"
-        numeric open "시가"
-        numeric high "고가"
-        numeric low "저가"
-        numeric close "종가"
-        numeric volume "거래량"
-        numeric change "등락률"
+      int id PK
+      date date "NOT NULL (수집일)"
+      varchar symbol "NOT NULL (종목코드)"
+      varchar name "종목명"
+      numeric open "시가"
+      numeric high "고가"
+      numeric low "저가"
+      numeric close "종가"
+      numeric volume "거래량"
+      numeric change "등락률"
     }
     
     PROMPT_LOGS {
-        int id PK
-        varchar symbol "NOT NULL (검색된 종목코드)"
-        text generated_prompt "생성된 프롬프트 결과"
-        varchar status "안전(Audit) 통과 여부"
-        timestamp created_at "생성 일시"
+      int id PK
+      varchar symbol "NOT NULL (검색된 종목코드)"
+      text generated_prompt "생성된 프롬프트 결과"
+      varchar status "안전(Audit) 통과 여부"
+      timestamp created_at "생성 일시"
     }
 
     RAW_STOCK_DATA ||--o{ PROMPT_LOGS : "기반으로 메타프롬프트 분석"
 ```
 
+---
+
 ## 3. 파이프라인 단계 및 모듈 역할
 
 ### 3.1. 데이터 수집 및 DB 적재 파이프라인 (`main.py`)
-파이프라인 관리 모듈은 로컬 `DBManager`를 통해 PostgreSQL 데이터베이스에 데이터를 직접 적재합니다.
 - **`get_fdr.py`**: FinanceDataReader 기반 초기 데이터 크롤링 수행
 - **`process_a1.py`, `process_b1.py`**: Dask 기반 시그널 데이터 및 기술적 지표 시트 분할 생성
-- **`db_manager.py`**: 파이프라인 1.5단계에서 `insert_raw_data` 쿼리 스크립트를 사용하여 수집된 Raw 데이터를 PostgreSQL로 Bulk Insert 함
-- **`queries/` 디렉토리**: SQL 인젝션 공격 방지를 위해 쿼리를 독립된 파일(`001_`, `002_`, `003_`)로 분리 관리
+- **`db_manager.py`**: 파이프라인 진행 및 DB 연결을 제어하며 `insert_raw_data` 및 `write_query` 메소드를 통해 데이터베이스 갱신
+- **`queries/` 디렉토리**: SQL 인젝션 공격 방지를 위해 쿼리를 독립된 파일(`001_` ~ `004_`)로 분리 관리
 
-#### 📊 파이프라인 데이터 흐름 시퀀스
-아래는 n8n 스케줄러가 정해진 시간에 파이프라인을 자동 트리거했을 때, 데이터가 어떻게 수집되고 가공되어 최종적으로 데이터베이스에 들어가는지를 보여줍니다.
+### 3.2. 보안 및 프롬프트 에이전트 (`agents/`)
+- **`AuditAgent` (`audit_agent.py`)**: 스팩(SPAC), ETF 등 불필요한 종목을 필터링하고, 잠재적인 SQL 인젝션 및 프롬프트 주입 공격을 사전 검증.
+- **`PromptMakerAgent` (`prompt_maker_agent.py`)**: 최근 5일 데이터 흐름을 추적하여 퀀트 관점에서 최적화된 프롬프트 생성.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Admin as 관리자 (Admin)
-    box rgba(30, 41, 59, 0.1) Docker n8n 컨테이너 내부
-    participant N8N as n8n (Manager Tier)
-    participant Main as main.py (Pipeline)
-    end
-    participant FDR as get_fdr.py (수집)
-    participant Dask as Dask Processor (가공)
-    participant DBManager as db_manager.py
-    participant DB as PostgreSQL (DB)
-
-    Admin->>N8N: n8n 워크플로우(Schedule Trigger) 활성화
-    Note over N8N, Main: -- 예약된 시간 도달 --
-    N8N->>Main: [Execute Command 노드] python3 main.py 실행
-    activate Main
-    Main->>FDR: 1단계: 종목 데이터 수집 명령
-    activate FDR
-    FDR-->>Main: 원시 데이터 (Parquet) 반환
-    deactivate FDR
-
-    Main->>DBManager: 1.5단계: Bulk Insert 요청
-    activate DBManager
-    DBManager->>DB: 002_insert_raw_data.sql 실행 (UPSERT)
-    DB-->>DBManager: 데이터베이스 갱신 완료
-    DBManager-->>Main: 적재 성공 응답
-    deactivate DBManager
-
-    Main->>Dask: 2~3단계: 기술적 지표 및 시그널 분할
-    activate Dask
-    Dask-->>Main: A1, B1 시트 생성 완료 (Local 저장)
-    deactivate Dask
-
-    Main-->>Admin: 전체 파이프라인 완료 알림
-    deactivate Main
-```
-
-### 3.2. 보안 에이전트 및 추가 모듈 (`agents/`)
-시스템 내에는 데이터 파이프라인 및 메타 정보 생성 시 보안과 퀄리티를 유지하기 위한 에이전트가 존재할 수 있습니다.
-- **`AuditAgent` (`audit_agent.py`)**: 스팩(SPAC), ETF 등 불필요한 종목을 파이프라인 도중 필터링하고, DB에 저장될 쿼리에 취약점이 없는지 검사하는 역할을 담당합니다.
+---
 
 ## 4. 실행 방법
 
-1. **Docker 컨테이너 동시 실행 (DB + Manager(n8n))**
-   ```bash
-   # 프로젝트 최상단 디렉토리에서 실행
-   docker compose up -d --build
-   ```
+### 1) PostgreSQL 데이터베이스 실행
+프로젝트 최상단 디렉토리에서 실행하여 DB 컨테이너를 구동합니다.
+```bash
+docker compose up -d
+```
 
-2. **자동 스케줄러(n8n) 접속 및 파이프라인 활성화**
-   - 브라우저에서 `http://localhost:5678` 로 접속합니다.
-   - n8n 워크플로우에 `Execute Command` 노드를 추가하고 `cd /app/Parser && python3 main.py`를 실행하도록 설정합니다. (또는 제공된 `n8n_workflow_template.json`을 Import)
-   - 스케줄 트리거를 설정해두면 관리자 개입 없이 매일 데이터가 백그라운드에서 자동 수집 및 적재됩니다.
+### 2) 웹 애플리케이션 및 API 서버 구동
+FastAPI 애플리케이션을 구동하여 정적 파일 서빙과 API 연동을 시작합니다.
+```bash
+python Parser/was_app/app.py
+```
+서버 구동 후 브라우저에서 `http://localhost:8000`으로 접속하여 주식 검색 웹 서비스(SPA)를 이용하실 수 있습니다.
+
+### 3) 데이터 수집 및 갱신 파이프라인 실행 (수동/스케줄러)
+새로운 주식 데이터를 수집하고 적재하려면 아래 파이프라인 명령을 실행합니다.
+```bash
+python Parser/main.py
+```
+*(매일 마감 후 주기적으로 실행되도록 OS의 Cron이나 작업 스케줄러에 등록하여 자동화할 수 있습니다.)*

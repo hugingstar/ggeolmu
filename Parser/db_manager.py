@@ -113,3 +113,21 @@ class DBManager:
             print(f"[DBManager] Read query failed: {e}")
             return []
 
+    def write_query(self, query_name_or_str: str, params: tuple = None) -> bool:
+        """
+        INSERT, UPDATE, DELETE 등 결과 반환이 없는 쓰기 쿼리를 실행합니다.
+        """
+        if not self.conn:
+            return False
+        
+        query = self.queries.get(query_name_or_str, query_name_or_str)
+        
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(query, params)
+                return True
+        except Exception as e:
+            print(f"[DBManager] Write query failed: {e}")
+            return False
+
+

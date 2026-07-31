@@ -1,6 +1,6 @@
-# 🏗️ Docker Compose 아키텍처 다이어그램
+# 🏗️ Docker Compose 및 웹 서비스 아키텍처
 
-`docker compose up -d --build` 명령어를 실행했을 때, 3개의 컨테이너(WEB, WAS, DB)가 어떠한 순서와 의존성을 가지고 실행되는지, 그리고 실제 시스템 내에서 데이터 흐름이 어떻게 동작하는지 보여주는 아키텍처 다이어그램입니다.
+Ggeolmu 주식 검색 웹사이트는 도커 데이터베이스 컨테이너와 로컬 FastAPI 웹 서버의 2-Tier 구조로 단순화되었습니다.
 
 ```mermaid
 flowchart TD
@@ -8,53 +8,40 @@ flowchart TD
     User((사용자))
     Admin((관리자))
     
-    subgraph Host ["Host Machine (Mac/PC)"]
+    subgraph Host ["Host Machine (Local)"]
         LocalData[/"./Data/pgdata"/]
         LocalParser[/"./Parser (Source Code)"/]
     end
 
     %% 도커 네트워크 내부
-    subgraph DockerNetwork ["Docker Internal Network (ggeolmu_default)"]
-        %% Manager Tier (Scheduler & Workflow)
-        Manager["manager (n8n) <br> (Port: 5678) <br> * 워크플로우 엔진 & 실행 환경"]
-        
-        %% DB Tier
+    subgraph DockerNetwork ["Docker Default Network"]
         DB[("postgres:15-alpine <br> (Port: 5432) <br> * 데이터 저장소")]
     end
 
-    %% 실행 트리거 및 의존성 (depends_on)
-    DB -. "1순위 구동" .-> Manager
+    %% 로컬 호스트 프로세스
+    FastAPI["FastAPI Web Server <br> (Port: 8000) <br> * API 제공 & SPA 정적 서빙"]
 
-    %% 파일 시스템 볼륨 매핑
+    %% 볼륨 매핑
     LocalData <==>|Volume Mount : 데이터 영구보존| DB
-    LocalData <==>|Volume Mount : n8n 설정 보존| Manager
-    LocalParser <==>|Volume Mount : 실시간 파이썬 접근| Manager
 
-    %% 관리자 데이터 파이프라인 트리거 (자동화)
-    Admin == "1. 워크플로우 및 스케줄 등록 (localhost:5678)" ==> Manager
-    Manager -- "2. 매일 정해진 스케줄(Cron)에 따라 <br> 컨테이너 내부에서 python main.py 실행" --> LocalParser
-    LocalParser -- "3. 데이터 수집/가공 후 DB 적재 (Bulk Insert)" --> DB
-
-    classDef container fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
-    classDef storage fill:#334155,stroke:#10b981,stroke-width:2px,color:#fff;
+    %% 통신 및 실행 관계
+    User == "웹사이트 접속 (localhost:8000)" ==> FastAPI
+    FastAPI -- "데이터 조회 및 로그 기록" --> DB
     
-    class DB,Manager container;
-    class LocalData,LocalParser storage;
+    Admin == "로컬 데이터 수집 실행 <br> python Parser/main.py" ==> LocalParser
+    LocalParser -- "종목 스크랩 및 DB UPSERT" --> DB
 ```
 
 ### 💡 작동 흐름 설명
 
-1. **빌드 및 복사 (`--build`)**:
-   - `Dockerfile.web`과 `Dockerfile.was`를 기반으로 이미지를 새로 굽습니다.
-   - 이때 호스트에 있는 `Parser` 안의 파이썬 코드와 정적 HTML/CSS 파일들이 컨테이너 내부로 복사(COPY)됩니다.
-2. **실행 순서 (`depends_on`)**:
-   - 가장 먼저 `postgres` (DB) 컨테이너가 켜집니다.
-   - DB가 준비되면, `was` (백엔드) 컨테이너가 켜지면서 DB_HOST 환경 변수를 통해 DB와 연결을 맺습니다.
-   - 마지막으로 `web` (프론트엔드 Nginx) 컨테이너가 켜집니다.
-3. **볼륨 매핑 (`volumes`)**:
+1. **데이터베이스 분리 (`docker compose up -d`)**:
+   - PostgreSQL 데이터베이스만 Docker 컨테이너 상에서 독립적으로 가동시킵니다.
    - 컨테이너 내부의 데이터베이스 정보는 휘발되지 않도록 호스트 컴퓨터의 `./Data/pgdata` 폴더와 영구적으로 동기화(Mount)됩니다.
-4. **접속**:
-   - 이제 사용자는 `http://localhost:3000`을 통해 안전하게 프론트엔드에 접속하고, 프론트엔드는 내부적으로 `8000`번 포트의 WAS와 통신하게 됩니다!
+2. **FastAPI 웹 서버 구동**:
+   - `Parser/was_app/app.py`를 가상환경에서 실행하면 내장된 Uvicorn 서버가 `8000`번 포트에서 요청을 처리하기 시작합니다.
+   - FastAPI는 `/api/*` 경로를 제외한 모든 자원에 대해 `web_static/index.html`을 서빙하여 **프론트엔드 중심 라우팅(SPA)**을 구현합니다.
+3. **로컬 파이프라인 구동**:
+   - 주가 갱신 및 가공이 필요할 시 `python Parser/main.py`를 수동이나 스케줄러를 통해 실행하며, 수집된 결과는 `db_manager`를 통해 데이터베이스에 반영됩니다.
 
 ---
 
