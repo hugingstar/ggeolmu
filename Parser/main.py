@@ -38,7 +38,11 @@ from process_a1 import DaskFinanceProcessor
 
 from process_m1_cap import run_process
 
-# --- DBManager Global Initialization ---
+# --- Global Initialization ---
+from db_manager import DBManager
+
+db = DBManager()
+
 
 # process_c1의 함수를 이름 충돌 방지를 위해 run_process_c1으로 가져옵니다.
 from process_c1 import get_kospi200_dask_data as run_process_c1 
@@ -115,7 +119,6 @@ class FinancePipeline:
         now, today_date, start_date_5d, _ = self._get_target_dates(market)
         
         # 🤖 Manager Tier: PipelineLifecycleAgent 기동
-        from pipeline_agent import PipelineLifecycleAgent
         agent = PipelineLifecycleAgent()
         exec_id = agent.start_pipeline(market=f"{market}_DATA_PIPELINE")
         
