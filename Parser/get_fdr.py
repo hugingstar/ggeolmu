@@ -76,19 +76,18 @@ def load_stock_list_from_csv(market_name):
 
 
 @delayed
-def fetch_stock_data(symbol, name, start_date, fdr_prefix=None, sleep_interval=0.1, max_retries=3):
+def fetch_stock_data(symbol, name, start_date, fdr_prefix=None, sleep_interval=0.005, max_retries=3):
     """
     개별 종목 데이터를 가져오는 지연 실행(Delayed) 함수.
-    - Dask 병렬 처리 시 서버 과부하를 막기 위해 내부에서 sleep 처리
-    - 연결 끊김(10054 에러 등) 발생 시 설정된 횟수만큼 재시도 후 안전하게 스킵
+    - Dask 멀티스레딩 병렬 수집 시 부하 분산을 위한 가벼운 딜레이 적용
+    - 연결 끊김 발생 시 설정된 횟수만큼 백오프 재시도 후 안전 스킵
     """
     query_symbol = f"{fdr_prefix}:{symbol}" if fdr_prefix else symbol
     
     for attempt in range(max_retries):
         try:
-            # 실제 요청 전 딜레이 (Dask Worker들이 동시에 요청 쏘는 것을 방지)
-            # 약간의 랜덤성을 부여하면 서버의 차단 확률을 더 낮출 수 있습니다.
-            time.sleep(sleep_interval + random.uniform(0.01, 0.05))
+            if sleep_interval > 0:
+                time.sleep(sleep_interval + random.uniform(0.001, 0.005))
             
             df = fdr.DataReader(query_symbol, start_date)
  
@@ -105,14 +104,12 @@ def fetch_stock_data(symbol, name, start_date, fdr_prefix=None, sleep_interval=0
  
         except Exception as e:
             if attempt < max_retries - 1:
-                # 에러 발생 시 2초 대기 후 재시도
-                time.sleep(2)
+                time.sleep(0.5 * (attempt + 1))
             else:
-                # 최종 실패 시 스킵 처리 (None 반환)
                 print(f"실패 (스킵됨): {name} ({symbol}) - {e}", flush=True)
                 return None
 
-def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sleep_interval=0.1):
+def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sleep_interval=0.005):
     print("종목 리스트를 불러오는 중...", flush=True)
     stocks = load_stock_list_from_csv(market_name)
     target_stocks = stocks.head(num_stocks)
@@ -154,10 +151,11 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
         task = fetch_stock_data(symbol, name, fetch_start_date, fdr_prefix=fdr_prefix, sleep_interval=sleep_interval)
         delayed_tasks.append(task)
 
-    print("Dask 그래프 계산 및 데이터 수집 시작...", flush=True)
+    print("Dask 멀티스레드 병렬 계산 및 데이터 증분 수집 시작...", flush=True)
     
     import dask
-    results = dask.compute(*delayed_tasks)
+    # 32개 쓰레드 병렬 스케줄러 적용 (2463개 종목 초속 수집)
+    results = dask.compute(*delayed_tasks, scheduler='threads', num_workers=32)
     valid_results = [r for r in results if r is not None]
 
     if not valid_results:
