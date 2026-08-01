@@ -77,26 +77,16 @@
               <th style="padding: 0.75rem;">종료 시각</th>
               <th style="padding: 0.75rem;">소요 시간</th>
               <th style="padding: 0.75rem;">실행 상태</th>
-              <th style="padding: 0.75rem;">세부 내역</th>
             </tr>
           </thead>
           <tbody id="pipeline-logs-tbody">
             <tr>
-              <td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-muted);">파이프라인 로깅 데이터를 불러오는 중입니다...</td>
+              <td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">파이프라인 로깅 데이터를 불러오는 중입니다...</td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
-  </div>
-
-  <!-- Detail Step Modal -->
-  <div id="detail-modal" class="autocomplete-dropdown hidden" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 650px; max-height: 80vh; overflow-y: auto; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.2); border-radius: 16px; padding: 1.5rem; z-index: 1000; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);">
-    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.75rem; margin-bottom: 1rem;">
-      <h3 id="modal-title" style="margin: 0; font-size: 1.2rem; color: #60a5fa;">📋 파이프라인 세부 진행 내역</h3>
-      <button id="modal-close-btn" style="background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer;">&times;</button>
-    </div>
-    <div id="modal-body" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #e2e8f0; white-space: pre-wrap; word-break: break-all;"></div>
   </div>
 
   <script src="js/pipeline.js"></script>

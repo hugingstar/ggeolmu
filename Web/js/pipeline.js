@@ -62,7 +62,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderLogsTable(logs) {
         if (!logs || logs.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-muted);">파이프라인 로깅 기록이 없습니다.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">파이프라인 로깅 기록이 없습니다.</td></tr>`;
             return;
         }
 
@@ -77,16 +77,6 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const durationStr = log.duration_seconds !== null ? `${log.duration_seconds} 초` : "-";
-            const detailJson = JSON.stringify({
-                execution_id: log.execution_id,
-                market: log.market,
-                start_time: log.start_time,
-                end_time: log.end_time,
-                duration_seconds: log.duration_seconds,
-                status: log.status,
-                step_details: _safeJsonParse(log.step_details),
-                error_message: log.error_message
-            }).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
 
             return `
                 <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.2s;">
@@ -96,27 +86,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     <td style="padding: 0.75rem; color: #cbd5e1;">${log.end_time || '-'}</td>
                     <td style="padding: 0.75rem; font-family: 'JetBrains Mono', monospace; color: #38bdf8;">${durationStr}</td>
                     <td style="padding: 0.75rem;">${statusBadge}</td>
-                    <td style="padding: 0.75rem;">
-                        <button class="tag-btn btn-view-detail" data-json="${detailJson}" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;">🔍 상세 보기</button>
-                    </td>
                 </tr>
             `;
         }).join("");
-
-        // 상세 보기 버튼 이벤트 리스너 바인딩
-        document.querySelectorAll(".btn-view-detail").forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                const jsonAttr = e.target.getAttribute("data-json");
-                try {
-                    const parsed = JSON.parse(jsonAttr);
-                    modalTitle.textContent = `📋 [${parsed.market}] 세부 진행 내역 (${parsed.execution_id})`;
-                    modalBody.textContent = JSON.stringify(parsed, null, 2);
-                    modal.classList.remove("hidden");
-                } catch (err) {
-                    console.error("Modal json parse error:", err);
-                }
-            });
-        });
     }
 
     function _safeJsonParse(input) {

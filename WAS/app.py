@@ -219,6 +219,21 @@ def get_stock_news(query: str = Query(..., description="종목명 또는 종목�
     NEWS_CACHE[cleaned_q] = (now, news_items)
     return news_items
 
+def _get_stock_display_name(symbol: str) -> str:
+    """종목코드(005930)가 입력된 경우 DB 조회를 통해 종목명(삼성전자 (005930))으로 유연하게 반환"""
+    if not symbol:
+        return "-"
+    symbol_str = str(symbol).strip()
+    try:
+        rows = db.read_query_direct("SELECT name FROM public.raw_stock_data WHERE symbol = %s LIMIT 1;", (symbol_str,))
+        if rows and rows[0] and rows[0][0]:
+            name = rows[0][0]
+            if name != symbol_str:
+                return f"{name} ({symbol_str})"
+    except Exception:
+        pass
+    return symbol_str
+
 @app.get("/api/analytics")
 def get_query_analytics():
     """
@@ -227,7 +242,14 @@ def get_query_analytics():
     top_queried = []
     try:
         records = db.read_query_direct("005_select_query_analytics.sql")
-        top_queried = [{"symbol": r[0], "count": r[1], "last_queried": str(r[2]) if r[2] else "-"} for r in records]
+        top_queried = [
+            {
+                "symbol": r[0],
+                "display_name": _get_stock_display_name(r[0]),
+                "count": r[1],
+                "last_queried": str(r[2]) if r[2] else "-"
+            } for r in records
+        ]
     except Exception as e:
         print(f"[Analytics Query Warning] {e}")
 

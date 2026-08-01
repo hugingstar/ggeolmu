@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const elbowChartBox = document.getElementById('elbow-chart-box');
   const summaryText = document.getElementById('cluster-summary-text');
 
-  let currentMarket = 'ALL';
+  let currentMarket = 'KOSPI';
 
   // Render SVG Elbow Curve Chart for optimal k criterion
   function renderElbowChart(elbowData, optimalK) {

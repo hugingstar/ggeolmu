@@ -31,9 +31,21 @@
   <!-- Main Logs Container -->
   <div class="glass-container main-wrapper">
     <header class="detail-header">
-      <h1>🛡️ AuditAgent 보안 검토 로그</h1>
-      <p>SPAC/ETF 불필요 종목 필터링 및 악성 SQL Injection 패턴 검증 수행 결과를 기록합니다.</p>
+      <h1>🛡️ Manager Tier Security Audit & Meta-Prompt Log Console</h1>
+      <p style="margin-top: 0.5rem; line-height: 1.6;">
+        <strong>📌 페이지 목적:</strong> 4-Tier 아키텍처의 Manager 계층(<code>AuditAgent</code> & <code>PromptMakerAgent</code>)이 웹 사용자 종목 검색 시 발생할 수 있는 
+        <strong>보안 취약점(SQL Injection, 프롬프트 주입 공격)</strong>과 불필요한 SPAC/ETF 종목을 1차 산출 검사한 <strong>보안 및 메타프롬프트 생성 이력 관제 페이지</strong>입니다.
+      </p>
     </header>
+
+    <!-- Page Purpose & Interpretation Guide Card -->
+    <section class="detail-card" style="margin-bottom: 1.5rem; background: rgba(30, 41, 59, 0.6); border-left: 4px solid #60a5fa;">
+      <h3 style="color: #60a5fa; margin-bottom: 0.5rem;">💡 결과 해석 방법 (How to Interpret Logs)</h3>
+      <ul style="line-height: 1.7; font-size: 0.9rem; color: #cbd5e1; margin-left: 1.2rem;">
+        <li><strong style="color: #34d399;">🟢 PASS / PASSED:</strong> 사용자 검색어가 SQL Injection 및 프롬프트 주입 공격으로부터 안전하고, SPAC/ETF 종목이 아님이 검증되어 <strong>AI 메타 프롬프트가 무사히 생성됨</strong>을 의미합니다.</li>
+        <li><strong style="color: #f87171;">🔴 REJECTED / BLOCKED:</strong> 악의적인 SQL injection 구문, 프롬프트 주입 시도, 또는 분석 불필요 종목이 감지되어 Manager 계층에서 <strong>WAS/DB로 전달되기 전 사전 차단되었음</strong>을 의미합니다.</li>
+      </ul>
+    </section>
 
     <section class="log-filter-section">
       <div class="filter-group">

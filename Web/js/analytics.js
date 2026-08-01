@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       tbody.innerHTML = data.top_queried_stocks.map((item, index) => `
         <tr>
           <td><strong>#${index + 1}</strong></td>
-          <td><a href="/?symbol=${item.symbol}" class="log-symbol-link">${item.symbol}</a></td>
+          <td><a href="/?symbol=${item.symbol}" class="log-symbol-link">${item.display_name || item.symbol}</a></td>
           <td><span class="badge badge-purple">${item.count} 회</span></td>
           <td>${item.last_queried ? item.last_queried.substring(0, 19).replace('T', ' ') : '-'}</td>
         </tr>
