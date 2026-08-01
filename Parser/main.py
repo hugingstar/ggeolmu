@@ -22,6 +22,7 @@ increase_file_descriptor_limit()
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 sys.path.append(os.path.join(project_root, "Database"))
+sys.path.append(os.path.join(project_root, "Manager"))
 
 # ======================================================================
 # External Module Pipeline Import
@@ -77,7 +78,10 @@ class FinancePipeline:
             return pd.DataFrame()
         try:
             if path.endswith('.parquet'):
-                return pd.read_parquet(path)
+                df = pd.read_parquet(path)
+                if df.index.name or not isinstance(df.index, pd.RangeIndex):
+                    df = df.reset_index()
+                return df
             else:
                 try:
                     return pd.read_csv(path, encoding='utf-8-sig')
