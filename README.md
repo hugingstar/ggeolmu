@@ -24,14 +24,13 @@ flowchart TD
         direction TB
         FDR[/"🌐 FinanceDataReader API"/] -->|3일 Overlap 수집| GetFDR["🐍 get_fdr.py"]
         GetFDR -->|원자적 저장 .tmp & .bak| RawParquet[/"📦 raw_data.parquet"/]
-        GetFDR -->|증분 델타 UPSERT| DB_Raw[("💾 DB: raw_stock_data")]
+        GetFDR -->|증분 델타 적재| DB_Raw[("💾 DB: raw_stock_data")]
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
     subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dask Engine)"]
         direction TB
-        DB_Raw -->|시세 데이터 로드| ProcessA1["🐍 process_a1.py (MA, RSI, MACD)"]
-        ProcessA1 -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
+        ProcessA1["🐍 process_a1.py (MA, RSI, MACD)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
         ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py (시그널 분석)"]
         ProcessB3 -->|시그널 저장| DB_Signal[("💾 DB: trading_signals")]
     end
@@ -39,12 +38,11 @@ flowchart TD
     %% 3단계: 시계열 클러스터링
     subgraph Step3 ["3단계: 시가총액 & 시계열 클러스터링"]
         direction TB
-        DB_Raw -->|시세 로드| ProcessM1["🐍 process_m1_cap.py"]
-        ProcessM1 -->|시총 저장| DB_Cap[("💾 DB: market_cap")]
+        ProcessM1["🐍 process_m1_cap.py"] -->|시총 저장| DB_Cap[("💾 DB: market_cap")]
         ProcessM1 -->|정규화| ProcessC1["🐍 process_c1.py (Z-Score)"]
         ProcessC1 -->|Z-Score 저장| DB_ZScore[("💾 DB: zscore_features")]
         ProcessC1 -->|SoftDTW 군집화| ProcessC2["🐍 process_c2.py (K-Means)"]
-        ProcessC2 -->|군집 저장| DB_Cluster[("💾 DB: clustering_results")]
+        ProcessC2 -->|군집 결과 저장| DB_Cluster[("💾 DB: clustering_results")]
     end
 
     %% 4단계: 4-Tier 웹 서비스 & 멀티 에이전트
@@ -53,15 +51,17 @@ flowchart TD
         UI[/"🖥️ WEB: Vanilla JS SPA UI"/] <-->|REST API| WAS["⚙️ WAS: FastAPI Server"]
         WAS <--> Audit["🤖 Manager: AuditAgent (검증/보안)"]
         WAS <--> PromptAgent["🤖 Manager: PromptMakerAgent (퀀트분석)"]
-        PromptAgent -->|5일 시세/지표 조회| DB_Raw
         WAS -->|프롬프트 기록| DB_Logs[("💾 DB: prompt_logs")]
         SecAgent["🤖 Manager: WebSecurityAgent"] -.- WAS
     end
 
-    %% 파이프라인 모듈 간 메인 연계선
-    Step1 ==>|Raw 시세 공급| Step2
-    Step1 ==>|기초 데이터 공급| Step3
-    Step2 & Step3 ==>|분석 지표 공급| Step4
+    %% [DB 핀포인트 흐름 연계선 (어떤 DB -> 어떤 DB/모듈)]
+    DB_Raw ==>|1. raw_stock_data 읽기| ProcessA1
+    DB_Raw ==>|2. raw_stock_data 읽기| ProcessM1
+    DB_Raw ==>|3. 5일 raw_stock_data 읽기| PromptAgent
+    DB_Tech ==>|4. technical_indicators 퀀트 공급| PromptAgent
+    DB_Signal ==>|5. trading_signals 시그널 조회| WAS
+    DB_Cluster ==>|6. clustering_results 3D 조회| WAS
 
     %% 노드 스타일 지정 (.py: 파란색, DB: 녹색, 에이전트: 핑크, Web/WAS: 슬레이트)
     class GetFDR,ProcessA1,ProcessB3,ProcessM1,ProcessC1,ProcessC2 pythonEngine;
