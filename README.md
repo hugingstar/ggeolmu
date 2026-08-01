@@ -50,7 +50,7 @@ flowchart TD
         UI[/"🖥️ WEB: Vanilla JS SPA UI<br>(/pipeline 및 5개 관제 페이지 UI/UX 개편)"/] <--> WAS["⚙️ WAS: FastAPI Server"]
         
         %% Redis Cache Layer 명시
-        WAS -.->|1. 인메모리 캐시 조회 (Hit/Miss)| RedisCache[("⚡ Redis Cache<br>(대시보드 API 250배 성능 개선)")]
+        WAS -.->|1. 인메모리 캐시 조회 Hit or Miss| RedisCache[("⚡ Redis Cache<br>(대시보드 API 250배 성능 개선)")]
         RedisCache -.->|2. 캐시 데이터 즉시 반환| WAS
         
         WAS <--> Audit["🤖 Manager: AuditAgent<br>(SPAC/ETF 필터 & SQLi 검사)"]
