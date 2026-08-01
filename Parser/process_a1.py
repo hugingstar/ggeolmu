@@ -159,16 +159,25 @@ class DaskFinanceProcessor:
             all_new_features[f"RSI_Signal{r_idx}"] = np.where(
                 target_rsi >= 70, 1, np.where(target_rsi <= 30, -1, 0)
             )
+
+        # --- Precompute peaks and troughs for MA5 to save CPU time ---
+        ma5_vals = df["MA5"].values
+        base_trough_idx = argrelextrema(ma5_vals, np.less, order=self.swing_order)[0]
+        base_peak_idx = argrelextrema(ma5_vals, np.greater, order=self.swing_order)[0]
+
+        for r_idx in ["", "2", "3", "4", "5", "6", "7", "8", "9"]:
+            target_rsi = rsi_base if r_idx == "" else rsi_base.rolling(window=int(r_idx)).mean()
+
             # 일반 다이버전스
-            bull, bear = self.divergence_optimized(df["MA5"], target_rsi, self.rsi_rollback)
+            bull, bear = self.divergence_optimized(df["MA5"], target_rsi, self.rsi_rollback, base_trough_idx, base_peak_idx)
             all_new_features[f"RSI_BullDiv{r_idx}"] = bull
             all_new_features[f"RSI_BearDiv{r_idx}"] = bear
             # 히든 다이버전스
-            h_bull, h_bear = self.hidden_divergence_optimized(df["MA5"], target_rsi, self.rsi_hidden_rollback)
+            h_bull, h_bear = self.hidden_divergence_optimized(df["MA5"], target_rsi, self.rsi_hidden_rollback, base_trough_idx, base_peak_idx)
             all_new_features[f"RSI_Hidden_BullDiv{r_idx}"] = h_bull
             all_new_features[f"RSI_Hidden_BearDiv{r_idx}"] = h_bear
             # 일반 상승 추세
-            up_trend, down_trend = self.trend_optimized(df["MA5"], target_rsi, self.rsi_trend_rollback)
+            up_trend, down_trend = self.trend_optimized(df["MA5"], target_rsi, self.rsi_trend_rollback, base_trough_idx, base_peak_idx)
             all_new_features[f"RSI_UpTrend{r_idx}"] = up_trend
             all_new_features[f"RSI_DownTrend{r_idx}"] = down_trend
         
@@ -372,7 +381,7 @@ class DaskFinanceProcessor:
     # ------------------------------------------------------------------
     # Regular Divergence
     # ------------------------------------------------------------------
-    def divergence_optimized(self, price, rsi, lookback):
+    def divergence_optimized(self, price, rsi, lookback, base_trough_idx, base_peak_idx):
         n = len(price)
         bull_div = np.zeros(n, dtype=np.int8)
         bear_div = np.zeros(n, dtype=np.int8)
@@ -383,10 +392,8 @@ class DaskFinanceProcessor:
         rsi_vals = rsi.values
         valid_mask = np.isfinite(price_vals) & np.isfinite(rsi_vals)
 
-        trough_idx = argrelextrema(price_vals, np.less, order=self.swing_order)[0]
-        peak_idx = argrelextrema(price_vals, np.greater, order=self.swing_order)[0]
-        trough_idx = trough_idx[valid_mask[trough_idx]]
-        peak_idx = peak_idx[valid_mask[peak_idx]]
+        trough_idx = base_trough_idx[valid_mask[base_trough_idx]]
+        peak_idx = base_peak_idx[valid_mask[base_peak_idx]]
 
         for idx_list, div_arr, p_range, r_range in [
             (trough_idx, bull_div, self.up_div_price, self.up_div_rsi_diff),
@@ -414,7 +421,7 @@ class DaskFinanceProcessor:
     # ------------------------------------------------------------------
     # Hidden Divergence
     # ------------------------------------------------------------------
-    def hidden_divergence_optimized(self, price, rsi, lookback):
+    def hidden_divergence_optimized(self, price, rsi, lookback, base_trough_idx, base_peak_idx):
         n = len(price)
         h_bull = np.zeros(n, dtype=np.int8)
         h_bear = np.zeros(n, dtype=np.int8)
@@ -425,10 +432,8 @@ class DaskFinanceProcessor:
         rsi_vals = rsi.values
         valid_mask = np.isfinite(price_vals) & np.isfinite(rsi_vals)
 
-        trough_idx = argrelextrema(price_vals, np.less, order=self.swing_order)[0]
-        peak_idx = argrelextrema(price_vals, np.greater, order=self.swing_order)[0]
-        trough_idx = trough_idx[valid_mask[trough_idx]]
-        peak_idx = peak_idx[valid_mask[peak_idx]]
+        trough_idx = base_trough_idx[valid_mask[base_trough_idx]]
+        peak_idx = base_peak_idx[valid_mask[base_peak_idx]]
 
         # --- Bullish Hidden Divergence ---
         for i in range(len(trough_idx) - 1):
@@ -473,7 +478,7 @@ class DaskFinanceProcessor:
     # ------------------------------------------------------------------
     # Regular Trend
     # ------------------------------------------------------------------
-    def trend_optimized(self, price, rsi, lookback):
+    def trend_optimized(self, price, rsi, lookback, base_trough_idx, base_peak_idx):
         n = len(price)
         up_trend = np.zeros(n, dtype=np.int8)
         down_trend = np.zeros(n, dtype=np.int8)
@@ -484,10 +489,8 @@ class DaskFinanceProcessor:
         rsi_vals = rsi.values
         valid_mask = np.isfinite(price_vals) & np.isfinite(rsi_vals)
 
-        trough_idx = argrelextrema(price_vals, np.less, order=self.swing_order)[0]
-        peak_idx = argrelextrema(price_vals, np.greater, order=self.swing_order)[0]
-        trough_idx = trough_idx[valid_mask[trough_idx]]
-        peak_idx = peak_idx[valid_mask[peak_idx]]
+        trough_idx = base_trough_idx[valid_mask[base_trough_idx]]
+        peak_idx = base_peak_idx[valid_mask[base_peak_idx]]
 
         # --- Up Trend ---
         for i in range(len(trough_idx) - 1):
@@ -613,84 +616,65 @@ class DaskFinanceProcessor:
     # ------------------------------------------------------------------
     # [수정] 파티션 처리: CSV 및 Parquet 동시 저장
     # ------------------------------------------------------------------
-    def _process_partition(self, pdf):
-        """파티션(Pandas DF) 단위로 종목별 처리."""
-        if pdf.empty:
-            return pd.Series(dtype=object)
+    def _process_single_stock(self, symbol, group):
+        """단일 종목 단위 처리 (Multiprocessing 병렬용)"""
+        if not isinstance(symbol, str) or not symbol or symbol.lower() == 'symbol':
+            return None
 
-        results = []
-        for symbol, group in pdf.groupby(level=0):
-            if not isinstance(symbol, str) or not symbol or symbol.lower() == 'symbol':
-                continue
+        try:
+            name = group['Name'].iloc[0]
+            df_sorted = group.sort_values('Date').reset_index(drop=True)
 
-            try:
-                name = group['Name'].iloc[0]
-                df_sorted = group.sort_values('Date').reset_index(drop=True)
+            if len(df_sorted) < 26:
+                return None
 
-                if len(df_sorted) < 26:
-                    print(f"[Skip] {symbol} ({name}): 데이터 길이 부족 ({len(df_sorted)} rows < 26)")
-                    continue
-
-                processed_df = self.calculate_indicators(df_sorted)
-                safe_name = self._sanitize_filename(name)
-                
-                # 1. Parquet 파일로 저장
-                filename_parquet = f"{safe_name}({symbol}).parquet"
-                filepath_parquet = os.path.join(self.save_dir_csv, filename_parquet)
-                processed_df.to_parquet(filepath_parquet, index=False, engine='pyarrow')
-                
-                results.append(symbol)
-            except Exception as e:
-                import traceback
-                print(f"[ERROR] {symbol}: {e}\n{traceback.format_exc()}")
-                continue
-
-        return pd.Series(results, dtype=object)
+            processed_df = self.calculate_indicators(df_sorted)
+            safe_name = self._sanitize_filename(name)
+            
+            filename_parquet = f"{safe_name}({symbol}).parquet"
+            filepath_parquet = os.path.join(self.save_dir_csv, filename_parquet)
+            processed_df.to_parquet(filepath_parquet, index=False, engine='pyarrow')
+            
+            return symbol
+        except Exception as e:
+            return None
 
     # ------------------------------------------------------------------
     # 실행
     # ------------------------------------------------------------------
     def run(self):
-        logging.getLogger("distributed.shuffle._scheduler_plugin").setLevel(logging.ERROR)
-        
-        # ===== [수정] CSV 저장 경로 디렉터리 생성 조치 =====
         os.makedirs(self.save_dir_csv, exist_ok=True)
-        
         input_full_path = os.path.join(self.input_path, self.market_name, self.input_file)
 
-        cfg = self.cluster_config
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Dask 시스템 가동... "
-              f"(workers={cfg['n_workers']}, "
-              f"mem={cfg['memory_limit']}, "
-              f"npartitions={cfg['npartitions']}, "
-              f"persist={cfg['use_persist']})")
-
-        with Client(
-            n_workers=cfg["n_workers"],
-            threads_per_worker=cfg["threads_per_worker"],
-            memory_limit=cfg["memory_limit"],
-        ) as client:
-            print(f"대시보드: {client.dashboard_link}")
-
-            ddf = dd.read_parquet(
-                input_full_path,
-                engine='pyarrow'
-            )
-
-            print(f"데이터 셔플링 및 인덱스 설정 중 (Symbol 기준, npartitions={cfg['npartitions']})...")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Pandas + Multiprocessing 시스템 가동 (Dask 셔플링 제거)...")
+        
+        # 1. Pandas로 전체 로드
+        print(f"데이터 로드 중 ({input_full_path})...")
+        df_all = pd.read_parquet(input_full_path, engine='pyarrow')
+        
+        # 2. Symbol 기준 그룹화
+        groups = [(sym, group) for sym, group in df_all.groupby('Symbol')]
+        
+        # 3. ProcessPoolExecutor 로 병렬 처리
+        import concurrent.futures
+        cpu_cores = max(1, min(os.cpu_count() or 4, 16))
+        print(f"총 {len(groups)}개 종목 기술적 지표 병렬 계산 시작 (CPU Cores: {cpu_cores})...")
+        
+        results = []
+        with concurrent.futures.ProcessPoolExecutor(max_workers=cpu_cores) as executor:
+            futures = [executor.submit(self._process_single_stock, sym, group) for sym, group in groups]
             
-            ddf = ddf.set_index('Symbol', npartitions=cfg["npartitions"])
-            if cfg["use_persist"]:
-                ddf = ddf.persist()
+            completed = 0
+            total = len(futures)
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                if res:
+                    results.append(res)
+                completed += 1
+                if completed % 100 == 0 or completed == total:
+                    print(f"진행 상황: {completed}/{total} 완료")
 
-            print("병렬 지표 계산 및 파일(CSV/Parquet) 저장 시작...")
-            process_task = ddf.map_partitions(
-                self._process_partition,
-                meta=pd.Series([], dtype=object),
-            )
-            results = process_task.compute()
-
-            print(f"\n--- 작업 완료: 총 {len(results)}개 종목 처리됨 (CSV & Parquet 저장 완료) ---")
+        print(f"\n--- 작업 완료: 총 {len(results)}개 종목 처리됨 (Parquet 저장 완료) ---")
 
 
 if __name__ == "__main__":
