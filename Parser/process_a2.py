@@ -307,7 +307,7 @@ class DaskFinanceProcessor:
 
         # 3. 경로 A: 다이버전스 + 골든크로스 결합
         complex_condition_buy = (
-            (all_new_features["MACD_Positive"] == 0) &      # MACD 0선 아래
+            (all_new_features["MACD_Positive"] == -1) &      # MACD 0선 아래
             (all_new_features["MACD_Signal"] == 1) &        # MACD 골든크로스
             ((all_new_features["RSI_BullDiv_Sum"] > 0) | (all_new_features["RSI_Hidden_BullDiv_Sum"] > 0)) &
             trend_negative &
