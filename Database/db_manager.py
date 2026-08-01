@@ -69,27 +69,50 @@ class DBManager:
         return self.queries.get(query_name, "")
 
     def initialize_tables(self):
-        """기본적인 종목 데이터 및 프롬프트 결과 저장용 테이블 생성"""
+        """기본적인 종목 데이터, 프롬프트 결과 및 파이프라인 로그 저장용 테이블 생성"""
         if not self.conn:
             return
         
         create_query = self.get_query("001_create_tables.sql")
-        if not create_query:
-            print("[DBManager] 오류: 001_create_tables.sql 파일을 찾을 수 없습니다.")
-            return
+        if create_query:
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute(create_query)
+                    idx_query = self.get_query("011_create_stock_indexes.sql")
+                    if idx_query:
+                        cur.execute(idx_query)
+            except Exception as e:
+                print(f"[DBManager] Table creation failed (001): {e}")
 
+        log_create_query = self.get_query("015_create_pipeline_logs.sql")
+        if log_create_query:
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute(log_create_query)
+            except Exception as e:
+                print(f"[DBManager] Table creation failed (015): {e}")
+
+    def upsert_pipeline_log(self, execution_id, market, start_time, end_time, duration_seconds, status, step_details, error_message):
+        """016_upsert_pipeline_logs.sql 기반 파이프라인 수집/가공 라이프사이클 로그 적재"""
+        query = self.get_query("016_upsert_pipeline_logs.sql")
+        if not query:
+            query = """
+            INSERT INTO public.pipeline_execution_logs (
+                execution_id, market, start_time, end_time, duration_seconds, status, step_details, error_message
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (execution_id)
+            DO UPDATE SET
+                end_time = EXCLUDED.end_time,
+                duration_seconds = EXCLUDED.duration_seconds,
+                status = EXCLUDED.status,
+                step_details = EXCLUDED.step_details,
+                error_message = EXCLUDED.error_message;
+            """
         try:
             with self.conn.cursor() as cur:
-                cur.execute(create_query)
-                idx_query = self.get_query("011_create_stock_indexes.sql")
-                if idx_query:
-                    cur.execute(idx_query)
-                tech_query = self.get_query("012_create_technical_tables.sql")
-                if tech_query:
-                    cur.execute(tech_query)
-                print("[DBManager] 테이블 데이터베이스, B-Tree 인덱스 및 기술분석 스키마 초기화 성공.")
+                cur.execute(query, (execution_id, market, start_time, end_time, duration_seconds, status, step_details, error_message))
         except Exception as e:
-            print(f"[DBManager] 테이블 생성 실패: {e}")
+            print(f"[DBManager] Error upserting pipeline execution log: {e}")
 
     def insert_raw_data(self, df: pd.DataFrame):
         """

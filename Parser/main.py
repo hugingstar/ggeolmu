@@ -107,56 +107,67 @@ class FinancePipeline:
         """1~4단계: 취득 -> 가공 -> 시트 생성 -> S3/DB 업로드 실행"""
         now, today_date, start_date_5d, _ = self._get_target_dates(market)
         
+        # 🤖 Manager Tier: PipelineLifecycleAgent 기동
+        from pipeline_agent import PipelineLifecycleAgent
+        agent = PipelineLifecycleAgent()
+        exec_id = agent.start_pipeline(market=f"{market}_DATA_PIPELINE")
+        
         print(f"\n{'='*60}\n[{now.strftime('%Y-%m-%d %H:%M:%S')}] {market} 1~4단계 파이프라인 (데이터 가공) 시작\n{'='*60}")
         
-        # 1단계: 데이터 취득 (증분 수집 적용)
-        print(f"[*] 1단계: {market} Raw 데이터 수집 중... (증분 감지 시 어제/최신 데이터만 빠르게 수집합니다)")
-        merged_df, new_df = get_kospi200_dask_data(
-            start_date="2000-01-01",
-            num_stocks=4000,
-            output_path=self.base_path,
-            sleep_interval=0.05,
-            market_name=market
-        )
-        
-        # 1.5단계: 수집된 증분 Raw Data를 PostgreSQL에 UPSERT 적재
-        print(f"[*] 1.5단계: {market} 증분 Raw 데이터를 PostgreSQL에 적재 중...")
         try:
-            from db_manager import DBManager
-            db = DBManager()
-            db.initialize_tables()  # 혹시 테이블이 없다면 생성
+            # 1단계: 데이터 취득 (증분 수집 적용)
+            print(f"[*] 1단계: {market} Raw 데이터 수집 중... (증분 감지 시 어제/최신 데이터만 빠르게 수집합니다)")
+            merged_df, new_df = get_kospi200_dask_data(
+                start_date="2000-01-01",
+                num_stocks=4000,
+                output_path=self.base_path,
+                sleep_interval=0.05,
+                market_name=market
+            )
+            agent.log_step(exec_id, market, now, "1단계_Raw데이터수집", "SUCCESS", {"new_count": len(new_df) if new_df is not None else 0})
             
-            target_insert_df = new_df if new_df is not None and not new_df.empty else merged_df
-            
-            if target_insert_df is not None and not target_insert_df.empty:
-                db.insert_raw_data(target_insert_df)
-                print(f"[OK] {market} Raw data ({len(target_insert_df)}건 증분) Database UPSERT 갱신 완료")
-            else:
-                raw_path = os.path.join(self.base_path, market, "raw_data.parquet")
-                if os.path.exists(raw_path):
-                    import dask.dataframe as dd
-                    ddf = dd.read_parquet(raw_path)
-                    df = ddf.compute()
-                    db.insert_raw_data(df)
-                    print(f"[OK] {market} Raw data ({len(df)}건) Database 갱신 완료")
+            # 1.5단계: 수집된 증분 Raw Data를 PostgreSQL에 UPSERT 적재
+            print(f"[*] 1.5단계: {market} 증분 Raw 데이터를 PostgreSQL에 적재 중...")
+            try:
+                from db_manager import DBManager
+                db = DBManager()
+                db.initialize_tables()  # 혹시 테이블이 없다면 생성
+                
+                target_insert_df = new_df if new_df is not None and not new_df.empty else merged_df
+                
+                if target_insert_df is not None and not target_insert_df.empty:
+                    db.insert_raw_data(target_insert_df)
+                    print(f"[OK] {market} Raw data ({len(target_insert_df)}건 증분) Database UPSERT 갱신 완료")
                 else:
-                    print(f"[Warn] {raw_path} 파일을 찾을 수 없어 DB 적재 건너뜀.")
+                    raw_path = os.path.join(self.base_path, market, "raw_data.parquet")
+                    if os.path.exists(raw_path):
+                        import dask.dataframe as dd
+                        ddf = dd.read_parquet(raw_path)
+                        df = ddf.compute()
+                        db.insert_raw_data(df)
+                        print(f"[OK] {market} Raw data ({len(df)}건) Database 갱신 완료")
+                    else:
+                        print(f"[Info] {market} 갱신할 신규 데이터가 없어 DB 적재를 스킵합니다.")
+            except Exception as db_e:
+                print(f"[Warning] {market} Database 적재 중 오류 발생: {db_e}")
+                agent.log_step(exec_id, market, now, "1.5단계_DB적재", "WARNING", {"error": str(db_e)})
+            
+            # 2단계: 데이터 가공
+            print(f"[*] 2단계: {market} 기술적 지표 병렬 가공 시작... (보조지표 계산 중, 프로그레스 바 표시됨)")
+            config_a1 = {
+                "input_path": self.base_path,
+                "output_path": self.base_path,
+                "market_name": market
+            }
+            processor = DaskFinanceProcessor(config_a1)
+            processor.run()
+            agent.log_step(exec_id, market, now, "2단계_지표가공", "SUCCESS")
+            
+            print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] {market} 1~4단계 파이프라인 완료")
+            agent.finish_pipeline(exec_id, market=f"{market}_DATA_PIPELINE", start_time=now, status="SUCCESS")
         except Exception as e:
-            print(f"[Error] DB 적재 중 오류 발생: {e}")
-
-        # 2단계: 데이터 가공
-        print(f"[*] 2단계: {market} 기술적 지표 병렬 가공 시작... (보조지표 계산 중, 프로그레스 바 표시됨)")
-        config_a1 = {
-            "input_path": self.base_path,
-            "output_path": self.base_path,
-            "market_name": market
-        }
-        processor = DaskFinanceProcessor(config_a1)
-        processor.run()
-        # self._upsert_a1(market) # (기존 함수 존재 가정)
-        
-        # 3단계: 날짜별 시트 생성 (MakeSheet 제거됨, DB에 직접 의존)
-        print(f"[*] 3단계: {market} 시그널별 날짜 시트 생성 단계 생략 (DB 직결)...")
+            agent.finish_pipeline(exec_id, market=f"{market}_DATA_PIPELINE", start_time=now, status="FAILED", error=e)
+            raise e
         # self._upsert_b1(market, now, start_date_5d)
         
         print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] {market} 1~4단계 파이프라인 완료")

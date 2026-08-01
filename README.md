@@ -3,7 +3,7 @@
 ## 1. 개요
 `Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집·가공하여 **PostgreSQL 데이터베이스에 적재**하고, 이를 멀티 에이전트(Multi-Agent) 기반으로 분석하여 시각화하는 **4-Tier (WEB-WAS-DB-Manager) 주식 분석 웹 서비스**입니다.
 
-macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **`get_dynamic_cluster_config()` 동적 자원 자동 감지 모듈**, **`Database/queries/` 14개 SQL 다중 자동 로딩**, **`_safe_read_file` 범용 파라미터 파일 호환 로더** 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
+macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **`PipelineLifecycleAgent` (시작/종료/소요시간/성공여부 로깅)**, **`get_dynamic_cluster_config()` 동적 자원 자동 감지 모듈**, **`Database/queries/` 16개 SQL 다중 자동 로딩**, **`_safe_read_file` 범용 파라미터 파일 호환 로더** 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
 
 ---
 
@@ -23,7 +23,7 @@ flowchart TD
     subgraph Step1 ["1단계: 0.5초 DB 중심 증분 수집 (Delta Ingestion)"]
         direction TB
         FDR[/"🌐 FinanceDataReader API"/] -->|0.5초 일괄 증분 수집| GetFDR["🐍 get_fdr.py<br>(DB MAX date 탐지)"]
-        GetFDR -->|증분 델타 직행 적재| DB_Raw[("💾 DB: raw_stock_data<br>(14개 SQL 중앙 관리)")]
+        GetFDR -->|증분 델타 직행 적재| DB_Raw[("💾 DB: raw_stock_data<br>(16개 SQL 중앙 관리)")]
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
@@ -51,6 +51,8 @@ flowchart TD
         WAS <--> Audit["🤖 Manager: AuditAgent<br>(SPAC/ETF 필터 & SQLi 검사)"]
         WAS <--> PromptAgent["🤖 Manager: PromptMakerAgent<br>(5일 시세/지표 퀀트분석)"]
         WAS -->|프롬프트 기록| DB_Logs[("💾 DB: prompt_logs")]
+        
+        PipeAgent["🤖 Manager: PipelineLifecycleAgent<br>(파이프라인 시작/끝/소요시간/성공 모니터링)"] -->|라이프사이클 기록| DB_PipeLogs[("💾 DB: pipeline_execution_logs")]
         SecAgent["🤖 Manager: WebSecurityAgent<br>(WEB-WAS-DB 취약점 탐지)"] -.- WAS
     end
 
@@ -61,8 +63,8 @@ flowchart TD
 
     %% 노드 스타일 지정 (.py: 파란색, DB: 녹색, 에이전트: 핑크, Web/WAS: 슬레이트)
     class GetFDR,ProcessA1,ProcessB3,ProcessM1,ProcessC1,ProcessC2 pythonEngine;
-    class DB_Raw,DB_Tech,DB_Signal,DB_Cap,DB_ZScore,DB_Cluster,DB_Logs dbStorage;
-    class Audit,PromptAgent,SecAgent agentManager;
+    class DB_Raw,DB_Tech,DB_Signal,DB_Cap,DB_ZScore,DB_Cluster,DB_Logs,DB_PipeLogs dbStorage;
+    class Audit,PromptAgent,PipeAgent,SecAgent agentManager;
     class UI,WAS,FDR webServer;
 ```
 
@@ -70,7 +72,7 @@ flowchart TD
 
 ### 2.2 개체 관계도 (ER Diagram)
 
-PostgreSQL 데이터베이스 7개 핵심 테이블 간의 수직 방사형 연관 관계입니다.
+PostgreSQL 데이터베이스 8개 핵심 테이블 간의 수직 방사형 연관 관계입니다.
 
 ```mermaid
 erDiagram
@@ -123,6 +125,15 @@ erDiagram
         varchar status
     }
 
+    PIPELINE_EXECUTION_LOGS {
+        varchar execution_id PK
+        varchar market
+        timestamp start_time
+        timestamp end_time
+        numeric duration_seconds
+        varchar status
+    }
+
     %% 수직 순차 방사형 관계 배치
     RAW_STOCK_DATA ||--|| MARKET_CAP : "일별 시총"
     RAW_STOCK_DATA ||--o{ TECHNICAL_INDICATORS : "보조 지표"
@@ -130,6 +141,7 @@ erDiagram
     RAW_STOCK_DATA ||--o{ ZSCORE_FEATURES : "Z-Score"
     RAW_STOCK_DATA ||--o{ CLUSTERING_RESULTS : "패턴 군집"
     RAW_STOCK_DATA ||--o{ PROMPT_LOGS : "에이전트 기록"
+    RAW_STOCK_DATA ||--o{ PIPELINE_EXECUTION_LOGS : "파이프라인 라이프사이클"
 ```
 
 ---
@@ -138,8 +150,9 @@ erDiagram
 
 - **WEB Tier (`Web/`)**: Vanilla JS 및 CSS Glassmorphism 기반 SPA. 반응형 상대 크기 조절 레이아웃 적용.
 - **WAS Tier (`WAS/app.py`)**: FastAPI 기반 비동기 REST API 서빙 및 정적 웹 리소스 제공.
-- **DB Tier (`Database/`)**: PostgreSQL DBMS. `Database/queries/` 수록 `001_`~`014_` SQL 쿼리 중앙 통합 관리 (SQL Injection 방지).
+- **DB Tier (`Database/`)**: PostgreSQL DBMS. `Database/queries/` 수록 `001_`~`016_` SQL 쿼리 중앙 통합 관리 (SQL Injection 방지).
 - **Manager Tier (`Manager/`)**:
+  - `PipelineLifecycleAgent`: 파이프라인 실행 시작/끝 시간, 소요시간(초), 세부 단계 상태, 에러 로그 모니터링 관리.
   - `AuditAgent`: 불필요 종목(ETF/SPAC) 필터링 및 프롬프트 주입/SQLi 검사.
   - `PromptMakerAgent`: 5일 주가 흐름 기반 퀀트 메타 프롬프트 일괄 생성.
   - `WebSecurityAgent`: WEB-WAS-DB 계층 취약점 탐지 및 보안 관리.
@@ -148,11 +161,13 @@ erDiagram
 
 ## 4. 파이프라인 핵심 기술 특장점 (Key Features)
 
-1. **동적 자원 자동 스케일링 (`get_dynamic_cluster_config`)**
+1. **파이프라인 라이프사이클 관리 에이전트 (`PipelineLifecycleAgent`)**
+   - MLFlow 스타일로 파이프라인 실행 시작/종료 시점, 총 소요 시간(초), 단계별 성공/실패 여부, 에러 트레이스백을 `pipeline_execution_logs` DB 테이블에 안전하게 로깅 및 통합 관리합니다.
+2. **동적 자원 자동 스케일링 (`get_dynamic_cluster_config`)**
    - 하드웨어 RAM과 CPU 코어 수를 자동 측정하여 Dask 클러스터를 동적 튜닝합니다.
-2. **PostgreSQL DB-Centric 초고속 직행 적재**
+3. **PostgreSQL DB-Centric 초고속 직행 적재**
    - `fdr.StockListing` 기반 0.5초 일괄 증분 수집 및 DB 최신일(`SELECT MAX(date)`) 직행 쿼리 조회를 결합하여 1초 만에 최신 시세를 DB에 반영합니다.
-3. **범용 파일 호환 로더 (`_safe_read_file`)**
+4. **범용 파일 호환 로더 (`_safe_read_file`)**
    - `.parquet` 및 `.csv` 파티션 파일 손상 방지 및 인코딩 2차 폴백(`utf-8-sig` ➡ `cp949`)을 적용하여 파이프라인 무결성을 유지합니다.
 
 ---
