@@ -43,18 +43,26 @@ class DBManager:
                     time.sleep(delay)
 
     def _load_all_queries(self):
-        """queries/ 디렉토리 안의 모든 sql 스크립트를 로드합니다."""
-        if not os.path.exists(self.query_dir):
-            return
+        """Database/queries 및 로컬 queries 디렉토리 안의 모든 sql 스크립트를 통합 로드합니다."""
+        curr_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(curr_dir)
         
-        for filename in os.listdir(self.query_dir):
-            if filename.endswith('.sql'):
-                file_path = os.path.join(self.query_dir, filename)
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        self.queries[filename] = f.read()
-                except Exception as e:
-                    print(f"[DBManager] 쿼리 파일 로드 실패 {filename}: {e}")
+        target_dirs = [
+            os.path.join(curr_dir, "queries"),
+            os.path.join(project_root, "Database", "queries"),
+            os.path.join(project_root, "Parser", "queries")
+        ]
+        
+        for qdir in target_dirs:
+            if os.path.exists(qdir):
+                for filename in os.listdir(qdir):
+                    if filename.endswith('.sql'):
+                        file_path = os.path.join(qdir, filename)
+                        try:
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                self.queries[filename] = f.read()
+                        except Exception as e:
+                            print(f"[DBManager] Failed to load query {filename}: {e}")
 
     def get_query(self, query_name: str) -> str:
         """이름으로 저장된 쿼리를 반환합니다."""
