@@ -39,8 +39,8 @@ from process_a1 import DaskFinanceProcessor
 from process_m1_cap import run_process
 
 # --- Global Initialization ---
-from pipeline_agent import PipelineLifecycleAgent
-from db_manager import DBManager
+from Manager.pipeline_agent import PipelineLifecycleAgent
+from Database.db_manager import DBManager
 
 db = DBManager()
 
