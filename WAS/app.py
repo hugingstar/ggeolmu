@@ -465,9 +465,46 @@ def read_analytics_html():
 def read_logs_html():
     return FileResponse(os.path.join(web_dir, "logs.html"))
 
+@app.get("/api/pipeline/logs")
+def get_pipeline_logs(limit: int = Query(50, description="조회 건수")):
+    """
+    PostgreSQL public.pipeline_execution_logs 테이블에서 최신 파이프라인 실행 로깅 데이터를 서빙합니다.
+    """
+    logs = []
+    try:
+        rows = db.read_query_direct(
+            "SELECT execution_id, market, start_time, end_time, duration_seconds, status, step_details, error_message, created_at "
+            "FROM public.pipeline_execution_logs ORDER BY start_time DESC LIMIT %s;", (limit,)
+        )
+        if rows:
+            for r in rows:
+                logs.append({
+                    "execution_id": r[0],
+                    "market": r[1],
+                    "start_time": r[2].strftime('%Y-%m-%d %H:%M:%S') if r[2] else None,
+                    "end_time": r[3].strftime('%Y-%m-%d %H:%M:%S') if r[3] else None,
+                    "duration_seconds": float(r[4]) if r[4] is not None else None,
+                    "status": r[5],
+                    "step_details": r[6],
+                    "error_message": r[7],
+                    "created_at": r[8].strftime('%Y-%m-%d %H:%M:%S') if r[8] else None
+                })
+    except Exception as e:
+        print(f"[Pipeline Logs API Warning] {e}")
+
+    return {
+        "status": "success",
+        "count": len(logs),
+        "logs": logs
+    }
+
 @app.get("/status")
 def read_status_html():
     return FileResponse(os.path.join(web_dir, "status.html"))
+
+@app.get("/pipeline")
+def read_pipeline_html():
+    return FileResponse(os.path.join(web_dir, "pipeline.html"))
 
 @app.get("/{catchall:path}")
 def read_spa_fallback(catchall: str):

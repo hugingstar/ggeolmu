@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ggeolmu Pipeline - 파이프라인 모니터링 관제</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Floating Glassmorphism Navigation Bar -->
+  <nav class="nav-bar">
+    <div class="nav-brand">
+      <a href="/" class="brand-link">
+        <span class="brand-icon">🤖</span>
+        <span class="brand-text">Ggeolmu Stock</span>
+      </a>
+    </div>
+    <div class="nav-menu">
+      <a href="/" class="nav-item">📈 종목 차트 & 뉴스</a>
+      <a href="/clustering" class="nav-item">🧩 시계열 클러스터링</a>
+      <a href="/analytics" class="nav-item">📊 조회 종합 관제</a>
+      <a href="/pipeline" class="nav-item active">⚙️ 파이프라인 모니터링</a>
+      <a href="/logs" class="nav-item">🛡️ Audit 로그</a>
+      <a href="/status" class="nav-item">📡 시스템 관제</a>
+    </div>
+  </nav>
+
+  <!-- Main Container -->
+  <div class="glass-container main-wrapper">
+    <header class="detail-header">
+      <div class="header-content" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+        <div>
+          <h1>⚙️ Pipeline Lifecycle Monitoring Dashboard</h1>
+          <p>4-Tier Manager 계층의 PipelineLifecycleAgent가 기록하는 실시간 수집/가공 라이프사이클 및 실행 모니터링 관제입니다.</p>
+        </div>
+        <button id="btn-refresh-pipeline" class="tag-btn" style="padding: 0.75rem 1.25rem; font-size: 0.95rem;">🔄 수동 갱신</button>
+      </div>
+    </header>
+
+    <!-- Top Summary Stat Cards -->
+    <section class="detail-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 2rem;">
+      <div class="detail-card text-center">
+        <h3 style="color: var(--text-muted); font-size: 0.9rem;">총 파이프라인 실행 횟수</h3>
+        <p id="stat-total-executions" style="font-size: 2.2rem; font-weight: 800; color: #60a5fa; margin-top: 0.5rem;">- 회</p>
+      </div>
+      <div class="detail-card text-center">
+        <h3 style="color: var(--text-muted); font-size: 0.9rem;">성공 파이프라인 (SUCCESS)</h3>
+        <p id="stat-success-executions" style="font-size: 2.2rem; font-weight: 800; color: #34d399; margin-top: 0.5rem;">- 회</p>
+      </div>
+      <div class="detail-card text-center">
+        <h3 style="color: var(--text-muted); font-size: 0.9rem;">실패 / 주의 (FAILED)</h3>
+        <p id="stat-failed-executions" style="font-size: 2.2rem; font-weight: 800; color: #f87171; margin-top: 0.5rem;">- 회</p>
+      </div>
+      <div class="detail-card text-center">
+        <h3 style="color: var(--text-muted); font-size: 0.9rem;">최근 실행 마감 시각</h3>
+        <p id="stat-latest-timestamp" style="font-size: 1.1rem; font-weight: 600; color: #f472b6; margin-top: 0.75rem;">-</p>
+      </div>
+    </section>
+
+    <!-- Pipeline Execution Data Table Section -->
+    <section class="detail-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3>📜 파이프라인 실행 라이프사이클 로그 (최신 50건)</h3>
+        <span style="font-size: 0.85rem; color: var(--text-muted);">🟢 5초 자동 동기화 활성</span>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table class="data-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+          <thead>
+            <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.1); color: var(--text-muted);">
+              <th style="padding: 0.75rem;">실행 ID</th>
+              <th style="padding: 0.75rem;">대상 마켓 / 모듈</th>
+              <th style="padding: 0.75rem;">시작 시각</th>
+              <th style="padding: 0.75rem;">종료 시각</th>
+              <th style="padding: 0.75rem;">소요 시간</th>
+              <th style="padding: 0.75rem;">실행 상태</th>
+              <th style="padding: 0.75rem;">세부 내역</th>
+            </tr>
+          </thead>
+          <tbody id="pipeline-logs-tbody">
+            <tr>
+              <td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-muted);">파이프라인 로깅 데이터를 불러오는 중입니다...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- Detail Step Modal -->
+  <div id="detail-modal" class="autocomplete-dropdown hidden" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 650px; max-height: 80vh; overflow-y: auto; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.2); border-radius: 16px; padding: 1.5rem; z-index: 1000; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);">
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+      <h3 id="modal-title" style="margin: 0; font-size: 1.2rem; color: #60a5fa;">📋 파이프라인 세부 진행 내역</h3>
+      <button id="modal-close-btn" style="background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer;">&times;</button>
+    </div>
+    <div id="modal-body" style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #e2e8f0; white-space: pre-wrap; word-break: break-all;"></div>
+  </div>
+
+  <script src="js/pipeline.js"></script>
+</body>
+</html>
