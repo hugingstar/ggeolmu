@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ggeolmu Logs - AuditAgent 검토 로그</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="nav-bar">
+    <div class="nav-brand">
+      <a href="/" class="brand-link">
+        <span class="brand-icon">🤖</span>
+        <span class="brand-text">Ggeolmu Stock</span>
+      </a>
+    </div>
+    <div class="nav-menu">
+      <a href="/" class="nav-item">📈 종목 차트 & 뉴스</a>
+      <a href="/clustering" class="nav-item">🧩 시계열 클러스터링</a>
+      <a href="/analytics" class="nav-item">📊 조회 종합 관제</a>
+      <a href="/logs" class="nav-item active">🛡️ Audit 로그</a>
+      <a href="/status" class="nav-item">📡 시스템 관제</a>
+    </div>
+  </nav>
+
+  <!-- Main Logs Container -->
+  <div class="glass-container main-wrapper">
+    <header class="detail-header">
+      <h1>🛡️ AuditAgent 보안 검토 로그</h1>
+      <p>SPAC/ETF 불필요 종목 필터링 및 악성 SQL Injection 패턴 검증 수행 결과를 기록합니다.</p>
+    </header>
+
+    <section class="log-filter-section">
+      <div class="filter-group">
+        <label for="status-filter">필터 선택:</label>
+        <select id="status-filter">
+          <option value="ALL">전체 보기</option>
+          <option value="PASS">PASS (검토 통과)</option>
+          <option value="REJECTED">REJECTED (차단)</option>
+        </select>
+      </div>
+    </section>
+
+    <div class="table-wrapper">
+      <table class="data-table" id="logs-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>종목코드</th>
+            <th>상태</th>
+            <th>생성 일시</th>
+            <th>상세 프롬프트</th>
+          </tr>
+        </thead>
+        <tbody id="logs-tbody">
+          <tr><td colspan="5" class="text-center text-muted">로그를 불러오는 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Modal View -->
+    <div id="prompt-modal" class="modal hidden">
+      <div class="modal-content glass-container">
+        <div class="modal-header">
+          <h3>📄 생성된 프롬프트 상세보기</h3>
+          <span class="close-modal-btn" id="close-modal">&times;</span>
+        </div>
+        <div class="modal-body">
+          <textarea id="modal-prompt-text" readonly></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    async function loadLogs() {
+      const tbody = document.getElementById('logs-tbody');
+      const filterSelect = document.getElementById('status-filter');
+      const modal = document.getElementById('prompt-modal');
+      const modalText = document.getElementById('modal-prompt-text');
+      const modalClose = document.getElementById('close-modal');
+
+      try {
+        const res = await fetch('/api/logs?limit=50');
+        if (!res.ok) return;
+        const logs = await res.json();
+
+        const render = (filter) => {
+          const filtered = logs.filter(l => filter === 'ALL' || l.status === filter);
+          if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">검색된 로그가 없습니다.</td></tr>';
+            return;
+          }
+
+          tbody.innerHTML = filtered.map(l => `
+            <tr>
+              <td>${l.id}</td>
+              <td><a href="/?symbol=${l.symbol}" class="log-symbol-link">${l.symbol}</a></td>
+              <td>
+                <span class="badge ${l.status === 'PASS' ? 'badge-success' : 'badge-danger'}">
+                  ${l.status}
+                </span>
+              </td>
+              <td>${l.created_at ? l.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
+              <td>
+                <button class="secondary-btn-sm view-prompt-btn" data-prompt="${l.generated_prompt ? l.generated_prompt.replace(/"/g, '&quot;') : ''}">프롬프트 보기</button>
+              </td>
+            </tr>
+          `).join('');
+        };
+
+        render('ALL');
+
+        filterSelect.addEventListener('change', (e) => render(e.target.value));
+
+        tbody.addEventListener('click', (e) => {
+          const btn = e.target.closest('.view-prompt-btn');
+          if (btn) {
+            modalText.value = btn.getAttribute('data-prompt');
+            modal.classList.remove('hidden');
+          }
+        });
+
+        modalClose.addEventListener('click', () => modal.classList.add('hidden'));
+        window.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+
+      } catch (e) {
+        console.error('Failed to load logs', e);
+      }
+    }
+    document.addEventListener('DOMContentLoaded', loadLogs);
+  </script>
+</body>
+</html>

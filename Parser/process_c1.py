@@ -30,8 +30,8 @@ class DaskProcessor:
         self.market_name = market_name
         self.exclude_keywords = exclude_keywords or []  # 필터링할 단어 리스트 추가
 
-        # csv 지정
-        self.input_file = "raw_data.csv"
+        # Parquet 지정
+        self.input_file = "raw_data.parquet"
 
         self.save_dir = os.path.join(self.output_path, self.market_name, "C1Sheet")
 
@@ -44,13 +44,18 @@ class DaskProcessor:
 
         # 2. Dask 데이터프레임으로 Parquet 읽기
         input_full_path = os.path.join(self.input_path, self.market_name, self.input_file)
+        if not os.path.exists(input_full_path):
+            input_full_path = os.path.join(self.input_path, self.market_name, "raw_data.csv")
         
         if not os.path.exists(input_full_path):
             print(f"[오류] 데이터 파일을 찾을 수 없습니다: {input_full_path}")
             return None
 
-        # csv 엔진으로 읽기
-        ddf = dd.read_csv(input_full_path)
+        # Parquet / CSV 엔진으로 읽기
+        if input_full_path.endswith('.parquet'):
+            ddf = dd.read_parquet(input_full_path)
+        else:
+            ddf = dd.read_csv(input_full_path)
 
         # === [추가 기능: 불필요한 단어 필터링] 데이터를 부르고 바로 적용 ===
         if self.exclude_keywords:
@@ -127,18 +132,18 @@ class DaskProcessor:
         # (2-1) Z-score 데이터의 Transpose
         trans_file_csv = os.path.join(self.save_dir, f"df_trans_{freq.lower()}.csv")
         trans_df = zscore_df.transpose()
+        # (2) Transpose 데이터 (X축: Date, Y축: Name)
+        trans_file_parquet = os.path.join(self.save_dir, f"df_trans_{freq.lower()}.parquet")
         trans_df.columns = trans_df.columns.astype(str)
-        trans_df.to_csv(trans_file_csv, encoding='utf-8-sig')
+        trans_df.to_parquet(trans_file_parquet)
 
         # (3) 통계 데이터 (평균, 표준편차)
-        stats_file_csv = os.path.join(self.save_dir, f"df_stats_{freq.lower()}.csv")
-        stats_df.to_csv(stats_file_csv, encoding='utf-8-sig')
+        stats_file_parquet = os.path.join(self.save_dir, f"df_stats_{freq.lower()}.parquet")
+        stats_df.to_parquet(stats_file_parquet)
 
         print(f"--- {freq.upper()} 처리 완료 ---")
-        print(f"가격 데이터: {pivot_file_csv}")
-        print(f"Z-Score 데이터: {zscore_file_csv}")
-        print(f"Transpose 데이터: {trans_file_csv}")
-        print(f"통계 데이터: {stats_file_csv}\n")
+        print(f"Transpose 데이터 (Parquet): {trans_file_parquet}")
+        print(f"통계 데이터 (Parquet): {stats_file_parquet}\n")
 
         return {"price": final_df, "zscore": zscore_df, "stats": stats_df}
 

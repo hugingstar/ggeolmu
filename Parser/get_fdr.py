@@ -121,52 +121,99 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
     cfg = MARKET_CONFIG.get(key, {"fdr_prefix": None})
     fdr_prefix = cfg.get("fdr_prefix")
 
+    # ===== [증분 수집 (Delta Ingestion) 자동 탐지] =====
+    target_dir = os.path.join(output_path, market_name) if not output_path.endswith(market_name) else output_path
+    parquet_path = os.path.join(target_dir, "raw_data.parquet")
+    tmp_parquet_path = os.path.join(target_dir, "raw_data.parquet.tmp")
+    bak_parquet_path = os.path.join(target_dir, "raw_data.parquet.bak")
+    
+    existing_df = None
+    fetch_start_date = start_date
+
+    if os.path.exists(parquet_path):
+        try:
+            existing_df = pd.read_parquet(parquet_path)
+            if not existing_df.empty and 'Date' in existing_df.columns:
+                existing_df['Date'] = pd.to_datetime(existing_df['Date'])
+                max_date = existing_df['Date'].max()
+                if pd.notnull(max_date):
+                    # 안전 윈도우 3일 적용 (휴장일/주말/수정주가 보정 반영)
+                    safe_start = (max_date - pd.Timedelta(days=3)).strftime('%Y-%m-%d')
+                    print(f"[{market_name}] 기존 parquet 파일 감지 (최신 날짜: {max_date.strftime('%Y-%m-%d')}). 증분 수집 시작일: {safe_start}")
+                    fetch_start_date = safe_start
+        except Exception as e:
+            print(f"[{market_name}] 기존 parquet 파일 로드 실패 ({e}). 전체 수집({start_date})으로 폴백합니다.")
+            existing_df = None
+
     delayed_tasks = []
     
-    print(f"데이터 수집 작업 생성 중 (대상: {len(target_stocks)} 종목)...", flush=True)
+    print(f"데이터 수집 작업 생성 중 (대상: {len(target_stocks)} 종목, 시작일: {fetch_start_date})...", flush=True)
     for index, row in target_stocks.iterrows():
         symbol = row['Symbol']
         name = row['Name']
-        
-        # Delayed 작업에 sleep_interval 전달 (for문 안에서의 sleep은 제거됨)
-        task = fetch_stock_data(symbol, name, start_date, fdr_prefix=fdr_prefix, sleep_interval=sleep_interval)
+        task = fetch_stock_data(symbol, name, fetch_start_date, fdr_prefix=fdr_prefix, sleep_interval=sleep_interval)
         delayed_tasks.append(task)
 
     print("Dask 그래프 계산 및 데이터 수집 시작...", flush=True)
     
     import dask
-    # 병렬 처리 중 과부하를 더 줄이고 싶다면 아래처럼 워커 개수(num_workers)를 제한할 수도 있습니다.
-    # results = dask.compute(*delayed_tasks, scheduler='threads', num_workers=4)
     results = dask.compute(*delayed_tasks)
-    
-    # 에러로 인해 None이 반환된(스킵된) 결과들은 여기서 자동으로 걸러집니다.
     valid_results = [r for r in results if r is not None]
 
     if not valid_results:
-        print("수집된 데이터가 없습니다.", flush=True)
-        return None
+        print("신규 수집된 데이터가 없습니다.", flush=True)
+        return existing_df, pd.DataFrame()
 
-    ddf = dd.from_pandas(pd.concat(valid_results, ignore_index=True), npartitions=4)
+    new_df = pd.concat(valid_results, ignore_index=True)
+    new_df['Date'] = pd.to_datetime(new_df['Date'])
 
-    print(f"데이터 저장 중... 경로: {output_path}", flush=True)
-    
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
+    # ===== [안전 중복 제거 및 병합 (Deduplicated Merge)] =====
+    if existing_df is not None and not existing_df.empty:
+        merged_df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        merged_df = new_df
 
-    final_df = ddf.compute()
-    
-    # 기존 CSV 저장 로직 유지
-    final_df.to_csv(f"{output_path}/raw_data.csv", index=False, encoding='utf-8-sig')
-    
-    # Parquet 저장 로직 추가
-    final_df.to_parquet(f"{output_path}/raw_data.parquet", index=False)
-    
-    print("저장 완료!", flush=True)
+    merged_df['Date_str'] = merged_df['Date'].dt.strftime('%Y-%m-%d')
+    # 동일 날짜 및 동일 종목에 대해 나중에 수집된 신규 데이터로 안전하게 덮어쓰기 (keep='last')
+    merged_df = merged_df.drop_duplicates(subset=['Date_str', 'Symbol'], keep='last')
+    merged_df = merged_df.drop(columns=['Date_str'])
+    merged_df = merged_df.sort_values(by=['Symbol', 'Date']).reset_index(drop=True)
 
-    if final_df is not None:
-        print(final_df.head())
-        print(final_df.shape)
-    return ddf
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+
+    save_df = merged_df.copy()
+    save_df['Date'] = save_df['Date'].dt.strftime('%Y-%m-%d')
+
+    # ===== [원자적 파일 교체 (Atomic Write Pattern)] =====
+    try:
+        # 1. 임시 파일에 쓰기
+        save_df.to_parquet(tmp_parquet_path, index=False, engine='pyarrow')
+        
+        # 2. 기존 원본이 있다면 백업 생성
+        if os.path.exists(parquet_path):
+            if os.path.exists(bak_parquet_path):
+                os.remove(bak_parquet_path)
+            os.rename(parquet_path, bak_parquet_path)
+
+        # 3. 임시 파일을 최종 타겟 파일로 원자적 교체
+        os.replace(tmp_parquet_path, parquet_path)
+        
+        # 4. 쓰기 성공 시 백업 제거
+        if os.path.exists(bak_parquet_path):
+            os.remove(bak_parquet_path)
+            
+        print(f"[{market_name}] raw_data.parquet 원자적 쓰기 완료! (총 {len(save_df)} 행, 증분 {len(new_df)} 건)", flush=True)
+    except Exception as e:
+        print(f"[{market_name}] Parquet 저장 중 오류 발생: {e}")
+        # 오류 발생 시 임시 파일 정리 및 백업 복구
+        if os.path.exists(tmp_parquet_path):
+            os.remove(tmp_parquet_path)
+        if os.path.exists(bak_parquet_path) and not os.path.exists(parquet_path):
+            os.rename(bak_parquet_path, parquet_path)
+        raise e
+
+    return save_df, new_df
 
 # 메인 실행부
 if __name__ == "__main__":

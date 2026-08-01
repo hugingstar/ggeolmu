@@ -10,17 +10,19 @@ class PromptMakerAgent:
         특정 종목을 검색했을 때, 데이터베이스에서 메타데이터를 조회하여
         해당 종목을 가장 잘 분석할 수 있는 맞춤형 프롬프트를 생성합니다.
         """
-        # 1. DB에서 해당 종목 정보 가져오기 (예외 처리 포함)
-        # 하드코딩된 쿼리를 삭제하고 003_select_prompt_data.sql을 이용
         try:
-            records = self.db.read_query_direct("003_select_prompt_data.sql", params=(symbol,))
+            records = self.db.read_query_direct("003_select_prompt_data.sql", params=(symbol, symbol))
+            if not records:
+                records = self.db.read_query_direct(
+                    "SELECT id, date, symbol, name, open, close, volume, change FROM public.raw_stock_data WHERE symbol ILIKE %s OR name ILIKE %s ORDER BY date DESC LIMIT 5;",
+                    (f"%{symbol}%", f"%{symbol}%")
+                )
         except Exception as e:
             return f"시스템 에러: 데이터를 불러올 수 없습니다. ({e})"
         
         if not records:
             return f"'{symbol}' 종목에 대한 데이터를 데이터베이스에서 찾을 수 없습니다. (종목 코드를 확인하세요)"
         
-        # 2. 메타데이터 조립
         latest = records[0]
         recent_trend_data = json.dumps([{
             "date": str(r[1]),
@@ -28,7 +30,6 @@ class PromptMakerAgent:
             "volume": float(r[6]) if r[6] else None
         } for r in records])
 
-        # 3. 메타-프롬프트 구성
         meta_prompt = f"""당신은 월스트리트 최고 수준의 시계열 데이터 분석가이자 퀀트 트레이더입니다.
 현재 '{symbol}' 종목에 대한 최근 5일치 데이터를 기반으로 향후 추세를 예측해야 합니다.
 

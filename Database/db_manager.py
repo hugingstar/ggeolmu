@@ -1,3 +1,4 @@
+# Database Tier: PostgreSQL DBManager (파라미터화 쿼리 및 재시도 연결 관리)
 import psycopg2
 from psycopg2.extras import execute_values
 import os
@@ -13,7 +14,7 @@ class DBManager:
         self.password = os.environ.get("DB_PASS", "postgres")
         self.conn = None
         
-        # 쿼리 파일 캐싱
+        # 쿼리 파일 캐싱 (Database/queries 디렉토리)
         self.queries = {}
         self.query_dir = os.path.join(os.path.dirname(__file__), "queries")
         
@@ -53,7 +54,7 @@ class DBManager:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         self.queries[filename] = f.read()
                 except Exception as e:
-                    print(f"[DBManager] Failed to load query {filename}: {e}")
+                    print(f"[DBManager] 쿼리 파일 로드 실패 {filename}: {e}")
 
     def get_query(self, query_name: str) -> str:
         """이름으로 저장된 쿼리를 반환합니다."""
@@ -66,15 +67,21 @@ class DBManager:
         
         create_query = self.get_query("001_create_tables.sql")
         if not create_query:
-            print("[DBManager] Error: 001_create_tables.sql not found.")
+            print("[DBManager] 오류: 001_create_tables.sql 파일을 찾을 수 없습니다.")
             return
 
         try:
             with self.conn.cursor() as cur:
                 cur.execute(create_query)
-                print("[DBManager] Tables initialized successfully.")
+                idx_query = self.get_query("011_create_stock_indexes.sql")
+                if idx_query:
+                    cur.execute(idx_query)
+                tech_query = self.get_query("012_create_technical_tables.sql")
+                if tech_query:
+                    cur.execute(tech_query)
+                print("[DBManager] 테이블 데이터베이스, B-Tree 인덱스 및 기술분석 스키마 초기화 성공.")
         except Exception as e:
-            print(f"[DBManager] Table creation failed: {e}")
+            print(f"[DBManager] 테이블 생성 실패: {e}")
 
     def insert_raw_data(self, df: pd.DataFrame):
         """
@@ -85,7 +92,7 @@ class DBManager:
 
         insert_query = self.get_query("002_insert_raw_data.sql")
         if not insert_query:
-            print("[DBManager] Error: 002_insert_raw_data.sql not found.")
+            print("[DBManager] 오류: 002_insert_raw_data.sql 파일을 찾을 수 없습니다.")
             return
         
         df_clean = df.where(pd.notnull(df), None)
@@ -99,9 +106,9 @@ class DBManager:
         try:
             with self.conn.cursor() as cur:
                 execute_values(cur, insert_query, records, page_size=1000)
-                print(f"[DBManager] Inserted/Updated {len(records)} records.")
+                print(f"[DBManager] {len(records)} 건 데이터 갱신/삽입 완료.")
         except Exception as e:
-            print(f"[DBManager] Insert failed: {e}")
+            print(f"[DBManager] Bulk Insert 실패: {e}")
 
     def read_query_direct(self, query_name_or_str: str, params: tuple = None) -> list:
         """
@@ -110,7 +117,6 @@ class DBManager:
         if not self.conn:
             return []
         
-        # 만약 .sql 로 끝나는 파일 이름이면 queries 딕셔너리에서 로드
         query = self.queries.get(query_name_or_str, query_name_or_str)
         
         try:
@@ -118,7 +124,7 @@ class DBManager:
                 cur.execute(query, params)
                 return cur.fetchall()
         except Exception as e:
-            print(f"[DBManager] Read query failed: {e}")
+            print(f"[DBManager] 조회 쿼리 실행 실패: {e}")
             return []
 
     def write_query(self, query_name_or_str: str, params: tuple = None) -> bool:
@@ -135,7 +141,7 @@ class DBManager:
                 cur.execute(query, params)
                 return True
         except Exception as e:
-            print(f"[DBManager] Write query failed: {e}")
+            print(f"[DBManager] 쓰기 쿼리 실행 실패: {e}")
             return False
 
     def read_query(self, query_name_or_str: str, params: tuple = None) -> pd.DataFrame:
@@ -161,7 +167,7 @@ class DBManager:
                     return pd.DataFrame(data, columns=columns)
                 return pd.DataFrame()
         except Exception as e:
-            print(f"[DBManager] read_query failed: {e}")
+            print(f"[DBManager] read_query 실패: {e}")
             return pd.DataFrame()
 
     def upsert_market_cap(self, df: pd.DataFrame):
@@ -187,9 +193,9 @@ class DBManager:
         try:
             with self.conn.cursor() as cur:
                 execute_values(cur, query, records, page_size=1000)
-                print(f"[DBManager] Upserted {len(records)} market_cap records.")
+                print(f"[DBManager] 시가총액 {len(records)} 레코드 Upsert 성공.")
         except Exception as e:
-            print(f"[DBManager] upsert_market_cap failed: {e}")
+            print(f"[DBManager] upsert_market_cap 실패: {e}")
 
     def upsert_zscore_features(self, df: pd.DataFrame, freq: str):
         if not self.conn or df.empty:
@@ -198,25 +204,29 @@ class DBManager:
         df_clean = df.where(pd.notnull(df), None)
         records = []
         for _, row in df_clean.iterrows():
-            d = row.get('Date')
-            sym = row.get('Symbol', row.get('Code'))
+            d = row.get('Date', row.get('date'))
+            sym = row.get('Symbol', row.get('symbol', row.get('Code', row.get('code'))))
             zs = row.get('ZScore', row.get('zscore'))
-            if pd.isna(zs):
-                zs = None
-            records.append((d, sym, freq, zs))
+            if pd.isna(zs) or zs is None or not d or not sym:
+                continue
+            records.append((str(d), str(sym), str(freq), float(zs)))
             
-        query = """
+        if not records:
+            print("[DBManager] upsert_zscore_features: 유효한 레코드가 없어 건너뜁니다.")
+            return
+
+        query = self.queries.get("009_upsert_zscore_features.sql", """
         INSERT INTO public.zscore_features (date, symbol, freq, zscore)
         VALUES %s
         ON CONFLICT (date, symbol, freq) DO UPDATE SET
-            zscore = EXCLUDED.zscore
-        """
+            zscore = EXCLUDED.zscore;
+        """)
         try:
             with self.conn.cursor() as cur:
                 execute_values(cur, query, records, page_size=1000)
-                print(f"[DBManager] Upserted {len(records)} zscore_features records for {freq}.")
+                print(f"[DBManager] ZScore 지표 {len(records)} 레코드 ({freq}) Upsert 성공.")
         except Exception as e:
-            print(f"[DBManager] upsert_zscore_features failed: {e}")
+            print(f"[DBManager] upsert_zscore_features 실패: {e}")
 
     def upsert_clustering_results(self, df: pd.DataFrame):
         if not self.conn or df.empty:
@@ -225,25 +235,103 @@ class DBManager:
         df_clean = df.where(pd.notnull(df), None)
         records = []
         for _, row in df_clean.iterrows():
-            td = row.get('TargetDate')
-            mkt = row.get('Market')
-            sym = row.get('Symbol', row.get('Code'))
-            cid = row.get('Cluster_ID', row.get('Cluster'))
-            method = row.get('Method')
-            records.append((td, mkt, sym, cid, method))
+            td = row.get('TargetDate', row.get('target_date'))
+            mkt = row.get('Market', row.get('market'))
+            sym = row.get('Symbol', row.get('symbol', row.get('Code', row.get('code'))))
+            cid = row.get('Cluster_ID', row.get('cluster_id', row.get('Cluster', row.get('clusters'))))
+            method = row.get('Method', row.get('method', 'kmeans_softdtw'))
+            if not td or not sym or cid is None or pd.isna(cid):
+                continue
+            records.append((str(td), str(mkt), str(sym), int(cid), str(method)))
             
-        query = """
+        if not records:
+            print("[DBManager] upsert_clustering_results: 유효한 레코드가 없어 건너뜁니다.")
+            return
+
+        query = self.queries.get("010_upsert_clustering_results.sql", """
         INSERT INTO public.clustering_results (target_date, market, symbol, cluster_id, method)
         VALUES %s
         ON CONFLICT (target_date, symbol, method) DO UPDATE SET
             market = EXCLUDED.market,
-            cluster_id = EXCLUDED.cluster_id
-        """
+            cluster_id = EXCLUDED.cluster_id;
+        """)
         try:
             with self.conn.cursor() as cur:
                 execute_values(cur, query, records, page_size=1000)
-                print(f"[DBManager] Upserted {len(records)} clustering_results records.")
+                print(f"[DBManager] 클러스터링 결과 {len(records)} 레코드 Upsert 성공.")
         except Exception as e:
-            print(f"[DBManager] upsert_clustering_results failed: {e}")
+            print(f"[DBManager] upsert_clustering_results 실패: {e}")
 
+    def upsert_technical_indicators(self, df: pd.DataFrame):
+        if not self.conn or df.empty:
+            return
+        df_clean = df.where(pd.notnull(df), None)
+        records = []
+        for _, row in df_clean.iterrows():
+            d = row.get('Date', row.get('date'))
+            sym = row.get('Symbol', row.get('symbol', row.get('Code', row.get('code'))))
+            if not d or not sym:
+                continue
+            name = row.get('Name', row.get('name', ''))
+            mkt = row.get('Market', row.get('market', ''))
+            ma5 = row.get('MA5', row.get('ma5'))
+            ma20 = row.get('MA20', row.get('ma20'))
+            ma60 = row.get('MA60', row.get('ma60'))
+            ma120 = row.get('MA120', row.get('ma120'))
+            ma200 = row.get('MA200', row.get('ma200'))
+            rsi = row.get('RSI', row.get('rsi'))
+            macd = row.get('MACD', row.get('macd'))
+            macd_sig = row.get('MACD_Signal', row.get('macd_signal'))
+            adx = row.get('ADX', row.get('adx'))
+            boll_h = row.get('Bollinger_High', row.get('bollinger_high'))
+            boll_l = row.get('Bollinger_Low', row.get('bollinger_low'))
+            records.append((str(d), str(sym), str(name), str(mkt), ma5, ma20, ma60, ma120, ma200, rsi, macd, macd_sig, adx, boll_h, boll_l))
 
+        if not records:
+            return
+
+        query = self.queries.get("013_upsert_technical_indicators.sql", """
+        INSERT INTO public.technical_indicators (date, symbol, name, market, ma5, ma20, ma60, ma120, ma200, rsi, macd, macd_signal, adx, bollinger_high, bollinger_low)
+        VALUES %s
+        ON CONFLICT (date, symbol) DO UPDATE SET
+            name = EXCLUDED.name, market = EXCLUDED.market, ma5 = EXCLUDED.ma5, ma20 = EXCLUDED.ma20, ma60 = EXCLUDED.ma60, ma120 = EXCLUDED.ma120, ma200 = EXCLUDED.ma200, rsi = EXCLUDED.rsi, macd = EXCLUDED.macd, macd_signal = EXCLUDED.macd_signal, adx = EXCLUDED.adx, bollinger_high = EXCLUDED.bollinger_high, bollinger_low = EXCLUDED.bollinger_low;
+        """)
+        try:
+            with self.conn.cursor() as cur:
+                execute_values(cur, query, records, page_size=1000)
+                print(f"[DBManager] 기술분석 지표 {len(records)} 레코드 Upsert 성공.")
+        except Exception as e:
+            print(f"[DBManager] upsert_technical_indicators 실패: {e}")
+
+    def upsert_trading_signals(self, df: pd.DataFrame):
+        if not self.conn or df.empty:
+            return
+        df_clean = df.where(pd.notnull(df), None)
+        records = []
+        for _, row in df_clean.iterrows():
+            d = row.get('Date', row.get('date'))
+            sym = row.get('Symbol', row.get('symbol', row.get('Code', row.get('code'))))
+            sig_type = row.get('Signal_Type', row.get('signal_type', row.get('Signal', 'NEUTRAL')))
+            if not d or not sym or not sig_type:
+                continue
+            name = row.get('Name', row.get('name', ''))
+            mkt = row.get('Market', row.get('market', ''))
+            sig_strength = row.get('Signal_Strength', row.get('signal_strength', 1.0))
+            desc = row.get('Description', row.get('description', ''))
+            records.append((str(d), str(sym), str(name), str(mkt), str(sig_type), float(sig_strength) if sig_strength else 1.0, str(desc)))
+
+        if not records:
+            return
+
+        query = self.queries.get("014_upsert_trading_signals.sql", """
+        INSERT INTO public.trading_signals (date, symbol, name, market, signal_type, signal_strength, description)
+        VALUES %s
+        ON CONFLICT (date, symbol, signal_type) DO UPDATE SET
+            name = EXCLUDED.name, market = EXCLUDED.market, signal_strength = EXCLUDED.signal_strength, description = EXCLUDED.description;
+        """)
+        try:
+            with self.conn.cursor() as cur:
+                execute_values(cur, query, records, page_size=1000)
+                print(f"[DBManager] 트레이딩 시그널 {len(records)} 레코드 Upsert 성공.")
+        except Exception as e:
+            print(f"[DBManager] upsert_trading_signals 실패: {e}")

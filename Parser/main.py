@@ -1,7 +1,13 @@
 import os
+import sys
 import json
 from datetime import datetime, timedelta
 import pytz
+
+# 4-Tier 디렉토리 독립 구조를 위한 sys.path 등록
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+sys.path.append(os.path.join(project_root, "Database"))
 
 # ======================================================================
 # External Module Pipeline Import
@@ -72,9 +78,9 @@ class FinancePipeline:
         
         print(f"\n{'='*60}\n[{now.strftime('%Y-%m-%d %H:%M:%S')}] {market} 1~4단계 파이프라인 (데이터 가공) 시작\n{'='*60}")
         
-        # 1단계: 데이터 취득
-        print(f"[*] 1단계: {market} Raw 데이터 수집 중... (종목 수가 많아 수 분 정도 소요될 수 있으며, 아래에 프로그레스 바가 표시됩니다)")
-        get_kospi200_dask_data(
+        # 1단계: 데이터 취득 (증분 수집 적용)
+        print(f"[*] 1단계: {market} Raw 데이터 수집 중... (증분 감지 시 어제/최신 데이터만 빠르게 수집합니다)")
+        merged_df, new_df = get_kospi200_dask_data(
             start_date="2000-01-01",
             num_stocks=4000,
             output_path=os.path.join(self.base_path, market),
@@ -82,23 +88,28 @@ class FinancePipeline:
             market_name=market
         )
         
-        # [신규] 1.5단계: 수집된 Raw Data를 PostgreSQL에 적재
-        print(f"[*] 1.5단계: {market} Raw 데이터를 PostgreSQL에 적재 중...")
+        # 1.5단계: 수집된 증분 Raw Data를 PostgreSQL에 UPSERT 적재
+        print(f"[*] 1.5단계: {market} 증분 Raw 데이터를 PostgreSQL에 적재 중...")
         try:
             from db_manager import DBManager
             db = DBManager()
             db.initialize_tables()  # 혹시 테이블이 없다면 생성
             
-            raw_path = os.path.join(self.base_path, market, "raw_data.parquet")
-            if os.path.exists(raw_path):
-                # Dask로 읽어서 Pandas로 변환 후 DB에 Bulk Insert (OOM 방지 위해 일부 파티션 단위 권장하나, 여기선 전체 읽음 처리)
-                import dask.dataframe as dd
-                ddf = dd.read_parquet(raw_path)
-                df = ddf.compute()
-                db.insert_raw_data(df)
-                print(f"[OK] {market} Raw data ({len(df)}건) Database 갱신 완료")
+            target_insert_df = new_df if new_df is not None and not new_df.empty else merged_df
+            
+            if target_insert_df is not None and not target_insert_df.empty:
+                db.insert_raw_data(target_insert_df)
+                print(f"[OK] {market} Raw data ({len(target_insert_df)}건 증분) Database UPSERT 갱신 완료")
             else:
-                print(f"[Warn] {raw_path} 파일을 찾을 수 없어 DB 적재 건너뜀.")
+                raw_path = os.path.join(self.base_path, market, "raw_data.parquet")
+                if os.path.exists(raw_path):
+                    import dask.dataframe as dd
+                    ddf = dd.read_parquet(raw_path)
+                    df = ddf.compute()
+                    db.insert_raw_data(df)
+                    print(f"[OK] {market} Raw data ({len(df)}건) Database 갱신 완료")
+                else:
+                    print(f"[Warn] {raw_path} 파일을 찾을 수 없어 DB 적재 건너뜀.")
         except Exception as e:
             print(f"[Error] DB 적재 중 오류 발생: {e}")
 
@@ -154,8 +165,8 @@ class FinancePipeline:
             'MARKET': market, 
             'TARGET_DATE': target_date,
             'BASE_PATH': self.base_path,
-            'CAP_PATH': f"{self.base_path}/{market}/M1Sheet/{target_date}/df_cap.csv",
-            'LOAD_PATH': f"{self.base_path}/{market}/C1Sheet/df_zscore_1w.csv",
+            'CAP_PATH': f"{self.base_path}/{market}/M1Sheet/{target_date}/df_cap.parquet" if os.path.exists(f"{self.base_path}/{market}/M1Sheet/{target_date}/df_cap.parquet") else f"{self.base_path}/{market}/M1Sheet/{target_date}/df_cap.csv",
+            'LOAD_PATH': f"{self.base_path}/{market}/C1Sheet/df_trans_1w.parquet" if os.path.exists(f"{self.base_path}/{market}/C1Sheet/df_trans_1w.parquet") else f"{self.base_path}/{market}/C1Sheet/df_trans_1w.csv",
             'SAVE_PATH': f"{self.base_path}/{market}/C2Sheet/{target_date}",
             
             'CAP_COLUMN': "MarketCap_KRW",
@@ -281,8 +292,8 @@ class FinancePipeline:
         a1_path = f"{self.base_path}/{market}/A1Sheet"
         if os.path.exists(a1_path):
             for file in os.listdir(a1_path):
-                if file.endswith('.csv'):
-                    df = self._safe_read_csv(os.path.join(a1_path, file))
+                if file.endswith('.parquet') or file.endswith('.csv'):
+                    df = self._safe_read_file(os.path.join(a1_path, file))
                     if not df.empty:
                         if 'Market' not in df.columns:
                             df['Market'] = market
@@ -304,8 +315,8 @@ class FinancePipeline:
             b1_path = f"{self.base_path}/{market}/B1Sheet/{date_str}"
             if os.path.exists(b1_path):
                 for file in os.listdir(b1_path):
-                    if file.endswith('.csv'):
-                        df = self._safe_read_csv(os.path.join(b1_path, file))
+                    if file.endswith('.parquet') or file.endswith('.csv'):
+                        df = self._safe_read_file(os.path.join(b1_path, file))
                         if not df.empty:
                             db.upsert_trading_signals(df)
 
@@ -317,8 +328,8 @@ class FinancePipeline:
         m1_path = f"{self.base_path}/{market}/M1Sheet/{target_date}"
         if os.path.exists(m1_path):
             for file in os.listdir(m1_path):
-                if file.endswith('.csv'):
-                    df = self._safe_read_csv(os.path.join(m1_path, file))
+                if file.endswith('.parquet') or file.endswith('.csv'):
+                    df = self._safe_read_file(os.path.join(m1_path, file))
                     if not df.empty:
                         df['Date'] = target_date
                         db.upsert_market_cap(df)
@@ -331,15 +342,17 @@ class FinancePipeline:
         c1_path = f"{self.base_path}/{market}/C1Sheet"
         if os.path.exists(c1_path):
             for freq in ['1d', '1w', '1m']:
-                target_file = os.path.join(c1_path, f"df_trans_{freq}.csv")
+                target_file_pq = os.path.join(c1_path, f"df_trans_{freq}.parquet")
+                target_file_csv = os.path.join(c1_path, f"df_trans_{freq}.csv")
+                target_file = target_file_pq if os.path.exists(target_file_pq) else target_file_csv
                 if os.path.exists(target_file):
-                    df = self._safe_read_csv(target_file)
+                    df = self._safe_read_file(target_file)
                     if not df.empty:
-                        # trans_df: index = Symbol, columns = Date. We need to unpivot(melt) it.
+                        # trans_df: index = Symbol (column 0 in CSV).
                         if 'Symbol' not in df.columns:
-                            # if symbol is in index
-                            df = df.reset_index().rename(columns={'index': 'Symbol'})
+                            df = df.rename(columns={df.columns[0]: 'Symbol'})
                         df_melt = df.melt(id_vars=['Symbol'], var_name='Date', value_name='ZScore')
+                        df_melt = df_melt[df_melt['ZScore'].notnull()]
                         db.upsert_zscore_features(df_melt, freq)
 
     def _upsert_c2(self, market, target_date):
@@ -355,11 +368,15 @@ class FinancePipeline:
                     if not df.empty:
                         df['Market'] = market
                         df['TargetDate'] = target_date
-                        if 'Symbol' not in df.columns and 'Code' in df.columns:
-                            df['Symbol'] = df['Code']
-                        if 'Cluster' in df.columns and 'Cluster_ID' not in df.columns:
+                        if 'Symbol' not in df.columns:
+                            df['Symbol'] = df[df.columns[0]]
+                        if 'clusters' in df.columns:
+                            df['Cluster_ID'] = df['clusters']
+                        elif 'Cluster' in df.columns:
                             df['Cluster_ID'] = df['Cluster']
-                        method_name = file.split('_k')[0] if '_k' in file else 'unknown'
+                        
+                        clean_name = file.replace('normalized_', '').replace('.csv', '')
+                        method_name = clean_name.split('_k')[0] if '_k' in clean_name else clean_name
                         df['Method'] = method_name
                         db.upsert_clustering_results(df)
 

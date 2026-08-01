@@ -600,10 +600,10 @@ class DaskFinanceProcessor:
                 processed_df = self.calculate_indicators(df_sorted)
                 safe_name = self._sanitize_filename(name)
                 
-                # 1. CSV 파일로 저장
-                filename_csv = f"{safe_name}({symbol}).csv"
-                filepath_csv = os.path.join(self.save_dir_csv, filename_csv)
-                processed_df.to_csv(filepath_csv, index=False, encoding='utf-8-sig')
+                # 1. Parquet 파일로 저장
+                filename_parquet = f"{safe_name}({symbol}).parquet"
+                filepath_parquet = os.path.join(self.save_dir_csv, filename_parquet)
+                processed_df.to_parquet(filepath_parquet, index=False, engine='pyarrow')
                 
                 results.append(symbol)
             except Exception as e:

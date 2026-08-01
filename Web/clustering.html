@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ggeolmu Clustering - 시계열 클러스터링 & 군집별 포함 종목</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="nav-bar">
+    <div class="nav-brand">
+      <a href="/" class="brand-link">
+        <span class="brand-icon">🤖</span>
+        <span class="brand-text">Ggeolmu Stock</span>
+      </a>
+    </div>
+    <div class="nav-menu">
+      <a href="/" class="nav-item">📈 종목 차트 & 뉴스</a>
+      <a href="/clustering" class="nav-item active">🧩 시계열 클러스터링</a>
+      <a href="/analytics" class="nav-item">📊 조회 종합 관제</a>
+      <a href="/logs" class="nav-item">🛡️ Audit 로그</a>
+      <a href="/status" class="nav-item">📡 시스템 관제</a>
+    </div>
+  </nav>
+
+  <!-- Main Clustering Container -->
+  <div class="glass-container main-wrapper">
+    <header class="detail-header">
+      <h1>🧩 시계열 클러스터링 및 군집별 소속 종목 분석</h1>
+      <p>SoftDTW TimeSeriesKMeans 머신러닝 알고리즘으로 분류된 주가 시계열 패턴과 군집별 소속 종목을 한눈에 표기합니다.</p>
+    </header>
+
+    <!-- Top Control Bar: Market Filter & Optimal k summary -->
+    <section class="cluster-control-bar">
+      <div class="filter-group">
+        <label for="market-filter">시장 선택:</label>
+        <div class="market-btn-group">
+          <button class="mkt-btn active" data-mkt="ALL">전체 (ALL)</button>
+          <button class="mkt-btn" data-mkt="KOSPI">KOSPI</button>
+          <button class="mkt-btn" data-mkt="KOSDAQ">KOSDAQ</button>
+          <button class="mkt-btn" data-mkt="NASDAQ">NASDAQ</button>
+          <button class="mkt-btn" data-mkt="NYSE">NYSE</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- AI Model Topology & Optimal Cluster Count (Elbow Method 관제) Grid -->
+    <section class="detail-grid" style="margin-bottom: 2rem;">
+      <!-- Left: 3D AI Model Topology Visualization -->
+      <div class="detail-card 3d-topology-card">
+        <h3>🔮 AI 모델 토폴로지 (SoftDTW Centroids 3D Depth)</h3>
+        <p class="text-muted small">시계열 데이터 거리(DTW Distance) 기반의 입체적 센트로이드 공간 구조입니다.</p>
+        <div id="topology-3d-box" class="topology-box">
+          <div class="loader">AI 모델 센트로이드 토폴로지 렌더링 중...</div>
+        </div>
+      </div>
+
+      <!-- Right: Optimal Cluster Count Selection Criterion (Elbow Curve) -->
+      <div class="detail-card">
+        <h3>📊 최적 군집 개수 선택 기준 (Elbow Method)</h3>
+        <p class="text-muted small" id="elbow-subtext">선택 마켓 DB 데이터 기반 왜곡(Inertia) 감소율 곡선 연산 중...</p>
+        <div id="elbow-chart-box" class="elbow-box">
+          <div class="loader">엘보우 차트 연산 중...</div>
+        </div>
+        <div class="note-box" id="elbow-reason-note" style="margin-top: 1rem;">
+          🎯 <strong>선택 기준:</strong> 왜곡 수치(Inertia) 꺾임점(Elbow Point) 자동 도출 중...
+        </div>
+      </div>
+    </section>
+
+    <!-- Cluster Cards Container (Displays stocks in each cluster) -->
+    <section>
+      <div class="panel-header">
+        <h2>📂 군집별 소속 종목 표기 (Cluster Stock Explorer)</h2>
+        <span class="text-muted small" id="cluster-summary-text">총 0개 군집 로딩 중</span>
+      </div>
+
+      <div id="clusters-container" class="clusters-grid">
+        <div class="loader">클러스터링 결과 및 소속 종목 데이터를 데이터베이스에서 불러오는 중...</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Interactive Stock Explorer Modal -->
+  <div id="cluster-stock-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-cluster-tag" id="modal-cluster-tag">Cluster #0</span>
+          <h2 id="modal-cluster-title">우상향 급등 주도주군</h2>
+          <p id="modal-cluster-desc" class="text-muted small">군집 소속 종목 전체 탐색</p>
+        </div>
+        <button id="modal-close-btn" class="modal-close-btn">&times;</button>
+      </div>
+
+      <div class="modal-toolbar">
+        <div class="modal-search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="modal-stock-search" placeholder="군집 내 종목명 또는 종목코드 검색 (예: 삼성, 0059)..." />
+        </div>
+        <div class="view-switch-group">
+          <button id="view-mode-grid" class="view-switch-btn active">📊 카드뷰</button>
+          <button id="view-mode-table" class="view-switch-btn">📋 리스트뷰</button>
+        </div>
+      </div>
+
+      <div class="modal-info-row">
+        <span id="modal-stock-count-info" class="modal-count-info">총 0개 종목</span>
+      </div>
+
+      <div id="modal-stock-body" class="modal-body-content">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/clustering.js"></script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ggeolmu Status - 4-Tier 시스템 관제</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="nav-bar">
+    <div class="nav-brand">
+      <a href="/" class="brand-link">
+        <span class="brand-icon">🤖</span>
+        <span class="brand-text">Ggeolmu Stock</span>
+      </a>
+    </div>
+    <div class="nav-menu">
+      <a href="/" class="nav-item">📈 종목 차트 & 뉴스</a>
+      <a href="/clustering" class="nav-item">🧩 시계열 클러스터링</a>
+      <a href="/analytics" class="nav-item">📊 조회 종합 관제</a>
+      <a href="/logs" class="nav-item">🛡️ Audit 로그</a>
+      <a href="/status" class="nav-item active">📡 시스템 관제</a>
+    </div>
+  </nav>
+
+  <!-- Main Container -->
+  <div class="glass-container main-wrapper">
+    <header class="detail-header">
+      <h1>📡 4-Tier System Health & Security 관제 콘솔</h1>
+      <p>WEB, WAS, DB 계층의 실시간 상태 및 Manager 보안 관제 통계를 모니터링합니다.</p>
+    </header>
+
+    <section class="detail-grid">
+      <div class="detail-card">
+        <h3>💾 데이터 저장소 상태 (PostgreSQL DB Tier)</h3>
+        <ul class="status-list">
+          <li>
+            <span class="label">연결 상태:</span>
+            <span class="value text-gradient-green">● Online (Retry-Protection Active)</span>
+          </li>
+          <li>
+            <span class="label">적재 테이블:</span>
+            <span class="value">public.raw_stock_data, public.prompt_logs, public.market_cap</span>
+          </li>
+          <li>
+            <span class="label">총 레코드 수:</span>
+            <span class="value" id="status-total-rows">- 건</span>
+          </li>
+          <li>
+            <span class="label">고유 종목 수:</span>
+            <span class="value" id="status-unique-stocks">- 개</span>
+          </li>
+          <li>
+            <span class="label">최근 데이터 수집일:</span>
+            <span class="value" id="status-latest-date">-</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="detail-card">
+        <h3>🛡️ 4-Tier 통합 보안 및 라이프사이클 관제 (Manager Tier)</h3>
+        
+        <div class="agent-status-box">
+          <div class="agent-info">
+            <strong>🌐 WEB Tier AuditAgent</strong>
+            <span class="badge-status-sm badge-pass-sm">Active</span>
+          </div>
+          <p class="text-muted small">오픈 리다이렉트, 원격 스크립트 차단 및 정적 자원 검증 (<span id="cnt-web-fails">0</span>건 탐지)</p>
+        </div>
+
+        <div class="agent-status-box">
+          <div class="agent-info">
+            <strong>⚙️ WAS Tier AuditAgent</strong>
+            <span class="badge-status-sm badge-pass-sm">Active</span>
+          </div>
+          <p class="text-muted small">Path Traversal, XSS 및 REST API 파라미터 검증 (<span id="cnt-was-fails">0</span>건 탐지)</p>
+        </div>
+
+        <div class="agent-status-box">
+          <div class="agent-info">
+            <strong>🗄️ DB Tier AuditAgent</strong>
+            <span class="badge-status-sm badge-pass-sm">Active</span>
+          </div>
+          <p class="text-muted small">SQL Injection 파라미터 검증 및 001_ 쿼리 규칙 확인 (<span id="cnt-db-fails">0</span>건 탐지)</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module">
+    async function loadStatus() {
+      try {
+        const [sRes, rRes] = await Promise.all([
+          fetch('/api/stats'),
+          fetch('/api/security/report')
+        ]);
+
+        if (sRes.ok) {
+          const stats = await sRes.json();
+          document.getElementById('status-total-rows').innerText = stats.total_rows.toLocaleString() + ' 건';
+          document.getElementById('status-unique-stocks').innerText = stats.unique_stocks.toLocaleString() + ' 개';
+          document.getElementById('status-latest-date').innerText = stats.latest_date || '-';
+        }
+
+        if (rRes.ok) {
+          const report = await rRes.json();
+          if (report.tier_failures) {
+            document.getElementById('cnt-web-fails').innerText = report.tier_failures.WEB || 0;
+            document.getElementById('cnt-was-fails').innerText = report.tier_failures.WAS || 0;
+            document.getElementById('cnt-db-fails').innerText = report.tier_failures.DB || 0;
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load status', e);
+      }
+    }
+    document.addEventListener('DOMContentLoaded', loadStatus);
+  </script>
+</body>
+</html>

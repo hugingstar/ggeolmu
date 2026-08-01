@@ -127,9 +127,8 @@ class run_cluster():
 
                 _data_res = pd.DataFrame(self._data, columns=data.columns, index=self._valid_index)
                 _data_res["clusters"] = y_pred
-                _data_res.to_csv(
-                    "{}/{}/normalized_{}.csv".format(self.SAVE_PATH, self.METHOD, str(n)),
-                    encoding="utf-8-sig"
+                _data_res.to_parquet(
+                    "{}/{}/normalized_{}.parquet".format(self.SAVE_PATH, self.METHOD, str(n))
                 )
             
             # Elbow 결과 저장 및 시각화
@@ -338,15 +337,20 @@ if __name__ == '__main__':
     # =========================================================================
     # [에러 해결용 안전 로드 함수] numpy categorical 및 문자열(알파벳) 섞인 메타데이터 오류 우회
     # =========================================================================
-    def _safe_read_csv(path):
+    def _safe_read_file(path):
         import os
         if not os.path.exists(path):
             return pd.DataFrame()
         try:
-            return pd.read_csv(path)
+            if path.endswith('.parquet'):
+                return pd.read_parquet(path)
+            else:
+                return pd.read_csv(path)
         except Exception as e:
             print(f"[Warning] Failed to read {path}: {e}")
             return pd.DataFrame()
+
+    _safe_read_csv = _safe_read_file
 
     # =========================================================================
     # 1. 동적 문자열 할당을 위한 기본 변수 (CONFIG에 맵핑 용도)
