@@ -22,7 +22,7 @@ flowchart TD
     %% 1단계: 증분 수집 및 원자적 적재
     subgraph Step1 ["1단계: 증분 데이터 수집 (Delta Ingestion)"]
         direction TB
-        FDR[/"🌐 FinanceDataReader API"/] -->|3일 Overlap 수집| GetFDR["🐍 get_fdr.py"]
+        FDR[/"🌐 FinanceDataReader API"/] -->|3일 Overlap 수집| GetFDR["🐍 get_fdr.py<br>(3일 Safety Overlap 수집)"]
         GetFDR -->|원자적 저장 .tmp & .bak| RawParquet[/"📦 raw_data.parquet"/]
         GetFDR -->|증분 델타 적재| DB_Raw[("💾 DB: raw_stock_data")]
     end
@@ -30,18 +30,18 @@ flowchart TD
     %% 2단계: 기술적 지표 및 시그널 연산
     subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dask Engine)"]
         direction TB
-        ProcessA1["🐍 process_a1.py (MA, RSI, MACD)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
-        ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py (시그널 분석)"]
+        ProcessA1["🐍 process_a1.py<br>(MA5~200, RSI, MACD 연산)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
+        ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py<br>(상승/하락/다이버전스 시그널)"]
         ProcessB3 -->|시그널 저장| DB_Signal[("💾 DB: trading_signals")]
     end
 
     %% 3단계: 시계열 클러스터링
     subgraph Step3 ["3단계: 시가총액 & 시계열 클러스터링"]
         direction TB
-        ProcessM1["🐍 process_m1_cap.py"] -->|시총 저장| DB_Cap[("💾 DB: market_cap")]
-        ProcessM1 -->|정규화| ProcessC1["🐍 process_c1.py (Z-Score)"]
+        ProcessM1["🐍 process_m1_cap.py<br>(시가총액 데이터 가공)"] -->|시총 저장| DB_Cap[("💾 DB: market_cap")]
+        ProcessM1 -->|정규화| ProcessC1["🐍 process_c1.py<br>(1d/1w/1m Z-Score 산출)"]
         ProcessC1 -->|Z-Score 저장| DB_ZScore[("💾 DB: zscore_features")]
-        ProcessC1 -->|SoftDTW 군집화| ProcessC2["🐍 process_c2.py (K-Means)"]
+        ProcessC1 -->|SoftDTW 군집화| ProcessC2["🐍 process_c2.py<br>(SoftDTW K-Means 군집화)"]
         ProcessC2 -->|군집 결과 저장| DB_Cluster[("💾 DB: clustering_results")]
     end
 
@@ -49,10 +49,10 @@ flowchart TD
     subgraph Step4 ["4단계: 4-Tier 웹 서비스 & Multi-Agent"]
         direction TB
         UI[/"🖥️ WEB: Vanilla JS SPA UI"/] <-->|REST API| WAS["⚙️ WAS: FastAPI Server"]
-        WAS <--> Audit["🤖 Manager: AuditAgent (검증/보안)"]
-        WAS <--> PromptAgent["🤖 Manager: PromptMakerAgent (퀀트분석)"]
+        WAS <--> Audit["🤖 Manager: AuditAgent<br>(SPAC/ETF 필터 & SQLi 검사)"]
+        WAS <--> PromptAgent["🤖 Manager: PromptMakerAgent<br>(5일 시세/지표 퀀트분석)"]
         WAS -->|프롬프트 기록| DB_Logs[("💾 DB: prompt_logs")]
-        SecAgent["🤖 Manager: WebSecurityAgent"] -.- WAS
+        SecAgent["🤖 Manager: WebSecurityAgent<br>(WEB-WAS-DB 취약점 탐지)"] -.- WAS
     end
 
     %% [DB 핀포인트 흐름 연계선 (어떤 DB -> 어떤 DB/모듈)]
