@@ -366,6 +366,20 @@ class FinancePipeline:
 
                         db.upsert_technical_indicators(df)
 
+                        # 트레이딩 시그널 추출 및 삽입 (A1Sheet에 포함되어 있음)
+                        signals_df = pd.DataFrame()
+                        if 'Sell_Signal' in df.columns:
+                            sell_idx = df['Sell_Signal'] == 1
+                            if sell_idx.any():
+                                s_df = df[sell_idx].copy()
+                                s_df['signal_type'] = 'SELL'
+                                s_df['description'] = 'MACD, RSI, CCI 과매도 데드크로스 매도 신호'
+                                s_df['signal_strength'] = 1.0
+                                signals_df = pd.concat([signals_df, s_df])
+                                
+                        if not signals_df.empty:
+                            db.upsert_trading_signals(signals_df)
+
     def _upsert_b1(self, market, now, start_date_5d):
         print(f"[*] B1Sheet DB 적재 시작: {market}")
         from db_manager import DBManager

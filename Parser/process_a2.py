@@ -76,15 +76,6 @@ class DaskFinanceProcessor:
             "mdi_acceleration_window": 3, # MDI 평균 윈도우
         }
 
-        # ===== Manipulation(스톱 헌트) 매수 신호 파라미터 =====
-        # BullDiv 발생 → 다이버전스 저점 아래로 급락(휩쏘) → 회복 시 매수
-        self.manip_buy_config = {
-            "div_lookback": 20,   # BullDiv 발생 후 신호가 유효한 구간(캔들 수)
-            "min_drop": 0.02,     # 다이버전스 저점 대비 최소 급락폭(2%) — 진짜 휩쏘만 인정
-            "max_drop": 0.25,     # 추세 붕괴로 간주하는 급락 상한(25%) — 초과 시 매수 금지
-            "cooldown": 5,        # 신호 발생 후 재무장 대기(캔들 수) — 중복 매수 방지
-        }
-
     # ------------------------------------------------------------------
     # 지표 계산
     # ------------------------------------------------------------------
@@ -325,14 +316,6 @@ class DaskFinanceProcessor:
         vol_ma20 = df['Volume'].rolling(window=20).mean()
         all_new_features['Volume_Climax'] = np.where(df['Volume'] > (vol_ma20 * 2.5), 1, 0)
 
-        # ==================================================================
-        # [추가] 유동성 사냥 이후 스마트 매수 신호
-        #   BullDiv 발생 → 다이버전스 저점 아래로 급락(휩쏘) → 회복(reclaim) 시 매수
-        #   * 반드시 Is_Pinbar / Volume_Climax / RSI_BullDiv 가 계산된 뒤에 호출할 것
-        # ==================================================================
-        all_new_features["Manip_Buy_Signal"] = self.manipulation_buy_signal(df, all_new_features)
-        # ==================================================================
-
         df = pd.concat([df, pd.DataFrame(all_new_features, index=df.index)], axis=1)
         return df
 
@@ -495,78 +478,6 @@ class DaskFinanceProcessor:
                 down_trend[b] = 1
 
         return up_trend, down_trend
-
-    # ------------------------------------------------------------------
-    # 유동성 사냥(Stop Hunt) 이후 스마트 매수 신호
-    # ------------------------------------------------------------------
-    def manipulation_buy_signal(self, df, features):
-        cfg = self.manip_buy_config
-        n = len(df)
-        signal = np.zeros(n, dtype=np.int8)
-        if n == 0:
-            return signal
-
-        low      = df["Low"].values
-        close    = df["Close"].values
-        bull     = np.asarray(features["RSI_BullDiv"])      
-        is_pin   = np.asarray(features["Is_Pinbar"])
-        vol_clmx = np.asarray(features["Volume_Climax"])
-        rsi      = np.asarray(features["RSI"])
-
-        div_lookback = cfg["div_lookback"]
-        min_drop     = cfg["min_drop"]
-        max_drop     = cfg["max_drop"]
-        cooldown     = cfg["cooldown"]
-
-        last_div_idx = -1      
-        div_low      = np.nan  
-        swept        = False   
-        sweep_low    = np.nan  
-        cd           = 0       
-
-        for i in range(n):
-            if cd > 0:
-                cd -= 1
-
-            if bull[i] == 1:
-                last_div_idx = i
-                div_low      = low[i]
-                swept        = False
-                sweep_low    = np.nan
-                continue
-
-            if last_div_idx < 0 or (i - last_div_idx) > div_lookback:
-                continue
-            if not np.isfinite(div_low) or div_low == 0:
-                continue
-
-            if low[i] < div_low:
-                swept = True
-                sweep_low = low[i] if not np.isfinite(sweep_low) else min(sweep_low, low[i])
-
-            if not swept:
-                continue
-
-            drop_pct = (div_low - sweep_low) / div_low
-
-            if drop_pct > max_drop:
-                last_div_idx = -1
-                swept        = False
-                sweep_low    = np.nan
-                continue
-
-            reclaim  = close[i] > div_low                                      
-            confirm  = (is_pin[i] == 1) or (vol_clmx[i] == 1)   
-            rsi_turn = (i > 0) and (rsi[i] > rsi[i - 1])        
-
-            if (drop_pct >= min_drop) and reclaim and (confirm or rsi_turn) and cd == 0:
-                signal[i] = 1
-                cd = cooldown
-                last_div_idx = -1
-                swept        = False
-                sweep_low    = np.nan
-
-        return signal
 
     # ------------------------------------------------------------------
     # 파일명 sanitize (Windows 금지문자 처리)

@@ -29,9 +29,9 @@ flowchart TD
     %% 2단계: 기술적 지표 및 시그널 연산
     subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dynamic RAM Control)"]
         direction TB
-        ProcessA1["🐍 process_a1.py<br>(Dynamic RAM Control / MA,RSI,MACD)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
-        ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py<br>(상승/하락/다이버전스 시그널)"]
-        ProcessB3 -->|시그널 저장| DB_Signal[("💾 DB: trading_signals")]
+        ProcessA1["🐍 process_a1.py<br>(Dynamic RAM Control / MA,RSI,MACD,Sell_Signal)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
+        ProcessA1 -->|시그널 직행 저장| DB_Signal[("💾 DB: trading_signals")]
+        ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py<br>(상승/하락/다이버전스 시계열 윈도우 집계)"]
     end
 
     %% 3단계: 시계열 클러스터링
