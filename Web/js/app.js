@@ -46,28 +46,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const width = 650;
     const height = 240;
-    const padding = 35;
+    
+    // 늘어난 레이아웃과 큰 폰트 지원을 위해 마진(패딩) 세분화
+    const paddingLeft = 10;
+    const paddingRight = 65;
+    const paddingTop = 25;
+    const paddingBottom = 25;
 
-    const chartWidth = width - padding * 2;
-    const chartHeight = height - padding * 2;
+    const chartWidth = width - paddingLeft - paddingRight;
+    const chartHeight = height - paddingTop - paddingBottom;
 
     const points = history.map((h, i) => {
       if (h.close === null) return null;
-      const x = padding + (i / Math.max(1, history.length - 1)) * chartWidth;
-      const y = padding + chartHeight - ((h.close - minVal) / range) * chartHeight;
+      const x = paddingLeft + (i / Math.max(1, history.length - 1)) * chartWidth;
+      const y = paddingTop + chartHeight - ((h.close - minVal) / range) * chartHeight;
       return { index: i, x, y, val: h.close, date: h.date, signal: h.signal, vol: h.volume };
     }).filter(p => p !== null);
 
     const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-    const areaPath = `${linePath} L ${points[points.length - 1].x} ${height - padding} L ${points[0].x} ${height - padding} Z`;
+    const areaPath = `${linePath} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`;
 
     const gridLines = [];
     for (let i = 0; i <= 3; i++) {
-      const y = padding + (i / 3) * chartHeight;
+      const y = paddingTop + (i / 3) * chartHeight;
       const price = maxVal - (i / 3) * range;
       gridLines.push(`
-        <line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3 3" />
-        <text x="${width - padding + 5}" y="${y + 4}" fill="rgba(255,255,255,0.4)" font-size="9" font-family="monospace">${formatNumber(Math.round(price))}</text>
+        <line x1="${paddingLeft}" y1="${y}" x2="${width - paddingRight}" y2="${y}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3 3" />
+        <text x="${width - paddingRight + 5}" y="${y + 4}" fill="rgba(255,255,255,0.75)" font-size="11" font-family="monospace" font-weight="500">${formatNumber(Math.round(price))}</text>
       `);
     }
 
@@ -78,22 +83,22 @@ document.addEventListener('DOMContentLoaded', () => {
       let markerEl = '';
       if (p.signal === 'BUY') {
         markerEl = `
-          <g transform="translate(${p.x}, ${p.y - 12})">
-            <circle cx="0" cy="0" r="8" fill="#10b981" />
-            <text x="0" y="3" fill="#ffffff" font-size="7" font-weight="bold" text-anchor="middle">매수</text>
+          <g transform="translate(${p.x}, ${p.y - 18})">
+            <rect x="-14" y="-10" width="28" height="16" rx="4" fill="#10b981" />
+            <text x="0" y="2" fill="#ffffff" font-size="9" font-weight="bold" text-anchor="middle">매수</text>
           </g>
         `;
       } else if (p.signal === 'SELL') {
         markerEl = `
-          <g transform="translate(${p.x}, ${p.y + 14})">
-            <circle cx="0" cy="0" r="8" fill="#f43f5e" />
-            <text x="0" y="3" fill="#ffffff" font-size="7" font-weight="bold" text-anchor="middle">매도</text>
+          <g transform="translate(${p.x}, ${p.y + 18})">
+            <rect x="-14" y="-6" width="28" height="16" rx="4" fill="#f43f5e" />
+            <text x="0" y="6" fill="#ffffff" font-size="9" font-weight="bold" text-anchor="middle">매도</text>
           </g>
         `;
       }
 
       const showDateLabel = (p.index % step === 0) || (p.index === points.length - 1);
-      const dateText = showDateLabel ? `<text x="${p.x}" y="${height - 8}" fill="rgba(255,255,255,0.5)" font-size="9" text-anchor="middle">${p.date.substring(5)}</text>` : '';
+      const dateText = showDateLabel ? `<text x="${p.x}" y="${height - 6}" fill="rgba(255,255,255,0.7)" font-size="11" text-anchor="middle">${p.date.substring(5)}</text>` : '';
       const dotCircle = (points.length <= 60 || p.signal !== 'NEUTRAL') ? `<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="#3b82f6" stroke="#ffffff" stroke-width="1" />` : '';
 
       return `
@@ -175,9 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (detailData) {
         currentSymbol = detailData.symbol;
         stockTitle.innerText = `${detailData.name} (${detailData.symbol})`;
-        stockBadges.innerHTML = `
-          <span class="badge badge-success">● PostgreSQL DB ${detailData.history.length}일치 이력 연동 완료</span>
-        `;
+        stockBadges.innerHTML = ``;
 
         chartArea.innerHTML = renderSvgChartWithSignals(detailData.history);
 

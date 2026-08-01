@@ -83,7 +83,7 @@
         </div>
 
         <!-- Data Table (Standardized) -->
-        <div class="table-container" style="max-height: 250px;">
+        <div class="table-container" style="max-height: 250px; overflow-y: auto;">
           <table class="data-table" id="stock-table">
             <thead>
               <tr>
@@ -99,15 +99,6 @@
             </tbody>
           </table>
         </div>
-
-        <!-- Prompt Card -->
-        <div class="prompt-box">
-          <div class="prompt-header">
-            <h3>✍️ Multi-Agent 생성 퀀트 프롬프트</h3>
-            <button id="copy-prompt-btn" class="secondary-btn">복사하기</button>
-          </div>
-          <textarea id="prompt-output" readonly placeholder="종목 검색 시 최적화된 프롬프트가 여기에 생성됩니다."></textarea>
-        </div>
       </main>
 
       <!-- Right Panel: Naver / Google Live News Feed -->
@@ -115,11 +106,20 @@
         <div class="panel-header">
           <h3>📰 실시간 최신 뉴스 (네이버/구글 증권)</h3>
         </div>
-        <div id="news-list-box" class="news-list">
+        <div id="news-list-box" class="news-list" style="margin-bottom: 1.5rem;">
           <div class="placeholder-msg">
             <span class="placeholder-icon">📰</span>
             <p>종목 검색 시 관련 언론사의 최신 실시간 뉴스가 여기에 수집됩니다.</p>
           </div>
+        </div>
+
+        <!-- Prompt Card (Moved below News Feed) -->
+        <div class="prompt-box">
+          <div class="prompt-header">
+            <h3>✍️ Multi-Agent 생성 퀀트 프롬프트</h3>
+            <button id="copy-prompt-btn" class="secondary-btn">복사하기</button>
+          </div>
+          <textarea id="prompt-output" readonly placeholder="종목 검색 시 최적화된 프롬프트가 여기에 생성됩니다."></textarea>
         </div>
       </aside>
     </div>
