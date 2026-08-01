@@ -3,7 +3,7 @@
 ## 1. 개요
 `Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집·가공하여 **PostgreSQL 데이터베이스에 적재**하고, 이를 멀티 에이전트(Multi-Agent) 기반으로 분석하여 시각화하는 **4-Tier (WEB-WAS-DB-Manager) 주식 분석 웹 서비스**입니다.
 
-macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`) 및 **`fdr.StockListing` 기반 0.5초 초고속 일괄 증분 수집(Bulk Fetch)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
+macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`) 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
 
 ---
 
@@ -19,12 +19,11 @@ flowchart TD
     classDef agentManager fill:#831843,stroke:#f472b6,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
     classDef webServer fill:#1e293b,stroke:#94a3b8,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
 
-    %% 1단계: 증분 수집 및 원자적 적재
-    subgraph Step1 ["1단계: 0.5초 일괄 증분 수집 (StockListing Bulk Fetch)"]
+    %% 1단계: DB 중심 초고속 증분 수집 및 DB 직행 적재
+    subgraph Step1 ["1단계: 0.5초 DB 중심 증분 수집 (DB-Centric Bulk Ingestion)"]
         direction TB
-        FDR[/"🌐 FinanceDataReader API"/] -->|0.5초 일괄 증분 수집| GetFDR["🐍 get_fdr.py<br>(StockListing Bulk Fetch)"]
-        GetFDR -->|원자적 저장 .tmp & .bak| RawParquet[/"📦 raw_data.parquet"/]
-        GetFDR -->|증분 델타 적재| DB_Raw[("💾 DB: raw_stock_data")]
+        FDR[/"🌐 FinanceDataReader API"/] -->|0.5초 일괄 증분 수집| GetFDR["🐍 get_fdr.py<br>(DB MAX date 탐지)"]
+        GetFDR -->|증분 델타 직행 적재| DB_Raw[("💾 DB: raw_stock_data")]
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
@@ -65,7 +64,7 @@ flowchart TD
 
     %% 노드 스타일 지정 (.py: 파란색, DB: 녹색, 에이전트: 핑크, Web/WAS: 슬레이트)
     class GetFDR,ProcessA1,ProcessB3,ProcessM1,ProcessC1,ProcessC2 pythonEngine;
-    class DB_Raw,DB_Tech,DB_Signal,DB_Cap,DB_ZScore,DB_Cluster,DB_Logs,RawParquet dbStorage;
+    class DB_Raw,DB_Tech,DB_Signal,DB_Cap,DB_ZScore,DB_Cluster,DB_Logs dbStorage;
     class Audit,PromptAgent,SecAgent agentManager;
     class UI,WAS,FDR webServer;
 ```
