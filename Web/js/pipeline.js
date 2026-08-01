@@ -62,16 +62,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderLogsTable(logs) {
         if (!logs || logs.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">파이프라인 로깅 기록이 없습니다.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">파이프라인 로깅 기록이 없습니다.</td></tr>`;
             return;
         }
 
         tbody.innerHTML = logs.map(log => {
             let statusBadge = "";
-            if (log.status === "SUCCESS") {
+            let currentStatus = log.status;
+            
+            // 타임아웃 30분 감지 (RUNNING 상태인데 30분이 지난 경우)
+            if (currentStatus === "RUNNING" && log.start_time) {
+                // start_time 문자열을 KST 혹은 현재 로컬 타임스탬프로 변환
+                const startTime = new Date(log.start_time.replace(' ', 'T') + '+09:00').getTime();
+                const now = new Date().getTime();
+                if ((now - startTime) > 30 * 60 * 1000) {
+                    currentStatus = "STOPPED";
+                }
+            }
+
+            if (currentStatus === "SUCCESS") {
                 statusBadge = `<span style="display: inline-block; padding: 0.2rem 0.6rem; border-radius: 9999px; background: rgba(52, 211, 153, 0.15); color: #34d399; font-weight: 600; font-size: 0.8rem;">🟢 SUCCESS</span>`;
-            } else if (log.status === "FAILED") {
+            } else if (currentStatus === "FAILED") {
                 statusBadge = `<span style="display: inline-block; padding: 0.2rem 0.6rem; border-radius: 9999px; background: rgba(248, 113, 113, 0.15); color: #f87171; font-weight: 600; font-size: 0.8rem;">🔴 FAILED</span>`;
+            } else if (currentStatus === "STOPPED") {
+                statusBadge = `<span style="display: inline-block; padding: 0.2rem 0.6rem; border-radius: 9999px; background: rgba(234, 179, 8, 0.15); color: #eab308; font-weight: 600; font-size: 0.8rem;">🟡 STOPPED (TIMEOUT)</span>`;
             } else {
                 statusBadge = `<span style="display: inline-block; padding: 0.2rem 0.6rem; border-radius: 9999px; background: rgba(96, 165, 250, 0.15); color: #60a5fa; font-weight: 600; font-size: 0.8rem;">🔵 RUNNING</span>`;
             }
@@ -80,7 +94,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
             return `
                 <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.2s;">
-                    <td style="padding: 0.75rem; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #94a3b8;">${log.execution_id}</td>
                     <td style="padding: 0.75rem; font-weight: 600; color: #f1f5f9;">${log.market}</td>
                     <td style="padding: 0.75rem; color: #cbd5e1;">${log.start_time || '-'}</td>
                     <td style="padding: 0.75rem; color: #cbd5e1;">${log.end_time || '-'}</td>
