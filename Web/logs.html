@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ggeolmu Logs - AuditAgent 검토 로그</title>
+  <title>Ggeolmu Logs - Security Audit & Meta-Prompt Log Console</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -38,7 +38,7 @@
       </p>
     </header>
 
-    <!-- Page Purpose & Interpretation Guide Card -->
+    <!-- 💡 결과 해석 방법 가이드 카드 -->
     <section class="detail-card" style="margin-bottom: 1.5rem; background: rgba(30, 41, 59, 0.6); border-left: 4px solid #60a5fa;">
       <h3 style="color: #60a5fa; margin-bottom: 0.5rem;">💡 결과 해석 방법 (How to Interpret Logs)</h3>
       <ul style="line-height: 1.7; font-size: 0.9rem; color: #cbd5e1; margin-left: 1.2rem;">
@@ -47,7 +47,8 @@
       </ul>
     </section>
 
-    <section class="log-filter-section">
+    <!-- 필터 + 건수 정보 바 -->
+    <section class="log-filter-section" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
       <div class="filter-group">
         <label for="status-filter">필터 선택:</label>
         <select id="status-filter">
@@ -56,15 +57,17 @@
           <option value="REJECTED">REJECTED (차단)</option>
         </select>
       </div>
+      <span id="log-count-info" style="font-size: 0.85rem; color: var(--text-muted);">총 - 건 표시 중</span>
     </section>
 
-    <div class="table-wrapper">
+    <!-- 고정 높이 스크롤 테이블 영역 -->
+    <div class="table-wrapper" style="max-height: 55vh; overflow-y: auto; border: 1px solid rgba(255,255,255,0.06); border-radius: 0.75rem;">
       <table class="data-table" id="logs-table">
-        <thead>
+        <thead style="position: sticky; top: 0; z-index: 2; background: rgba(15, 23, 42, 0.95);">
           <tr>
             <th>ID</th>
-            <th>종목코드</th>
-            <th>상태</th>
+            <th>검색종목</th>
+            <th>보안 검토 결과</th>
             <th>생성 일시</th>
             <th>상세 프롬프트</th>
           </tr>
@@ -75,77 +78,148 @@
       </table>
     </div>
 
-    <!-- Modal View -->
-    <div id="prompt-modal" class="modal hidden">
-      <div class="modal-content glass-container">
-        <div class="modal-header">
-          <h3>📄 생성된 프롬프트 상세보기</h3>
-          <span class="close-modal-btn" id="close-modal">&times;</span>
-        </div>
-        <div class="modal-body">
-          <textarea id="modal-prompt-text" readonly></textarea>
-        </div>
+    <!-- 페이지네이션 바 -->
+    <div id="pagination-bar" style="display: flex; justify-content: center; align-items: center; gap: 0.5rem; margin-top: 1rem;">
+      <!-- JS로 동적 생성 -->
+    </div>
+  </div>
+
+  <!-- 프롬프트 상세보기 모달 (CSS .modal-backdrop / .modal-card 표준 준수) -->
+  <div id="prompt-modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal-card" style="width: 90%; max-width: 700px; max-height: 75vh;">
+      <div class="modal-header">
+        <h2>📄 생성된 메타 프롬프트 상세보기</h2>
+        <button class="modal-close-btn" id="close-modal">&times;</button>
+      </div>
+      <div style="padding: 1rem; overflow-y: auto; max-height: 55vh;">
+        <textarea id="modal-prompt-text" readonly style="width: 100%; min-height: 300px; background: rgba(15, 23, 42, 0.8); color: #e2e8f0; border: 1px solid rgba(255,255,255,0.1); border-radius: 0.5rem; padding: 1rem; font-family: var(--font-mono); font-size: 0.85rem; resize: vertical;"></textarea>
       </div>
     </div>
   </div>
 
-  <script type="module">
-    async function loadLogs() {
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
       const tbody = document.getElementById('logs-tbody');
       const filterSelect = document.getElementById('status-filter');
-      const modal = document.getElementById('prompt-modal');
+      const countInfo = document.getElementById('log-count-info');
+      const paginationBar = document.getElementById('pagination-bar');
+      const modalBackdrop = document.getElementById('prompt-modal-backdrop');
       const modalText = document.getElementById('modal-prompt-text');
       const modalClose = document.getElementById('close-modal');
 
+      const PAGE_SIZE = 20; // 페이지당 건수
+      let currentPage = 1;
+      let allLogs = [];
+      let filteredLogs = [];
+
+      // 로그 데이터 로딩
       try {
-        const res = await fetch('/api/logs?limit=50');
+        const res = await fetch('/api/logs?limit=200');
         if (!res.ok) return;
-        const logs = await res.json();
-
-        const render = (filter) => {
-          const filtered = logs.filter(l => filter === 'ALL' || l.status === filter);
-          if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">검색된 로그가 없습니다.</td></tr>';
-            return;
-          }
-
-          tbody.innerHTML = filtered.map(l => `
-            <tr>
-              <td>${l.id}</td>
-              <td><a href="/?symbol=${l.symbol}" class="log-symbol-link">${l.symbol}</a></td>
-              <td>
-                <span class="badge ${l.status === 'PASS' ? 'badge-success' : 'badge-danger'}">
-                  ${l.status}
-                </span>
-              </td>
-              <td>${l.created_at ? l.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
-              <td>
-                <button class="secondary-btn-sm view-prompt-btn" data-prompt="${l.generated_prompt ? l.generated_prompt.replace(/"/g, '&quot;') : ''}">프롬프트 보기</button>
-              </td>
-            </tr>
-          `).join('');
-        };
-
-        render('ALL');
-
-        filterSelect.addEventListener('change', (e) => render(e.target.value));
-
-        tbody.addEventListener('click', (e) => {
-          const btn = e.target.closest('.view-prompt-btn');
-          if (btn) {
-            modalText.value = btn.getAttribute('data-prompt');
-            modal.classList.remove('hidden');
-          }
-        });
-
-        modalClose.addEventListener('click', () => modal.classList.add('hidden'));
-        window.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
-
+        allLogs = await res.json();
       } catch (e) {
         console.error('Failed to load logs', e);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">로그 로딩 실패</td></tr>';
+        return;
       }
-    }
-    document.addEventListener('DOMContentLoaded', loadLogs);
+
+      // 필터링 함수
+      function applyFilter(filter) {
+        filteredLogs = filter === 'ALL' ? [...allLogs] : allLogs.filter(l => l.status === filter);
+        currentPage = 1;
+        renderPage();
+      }
+
+      // 페이지 렌더링
+      function renderPage() {
+        const totalPages = Math.max(1, Math.ceil(filteredLogs.length / PAGE_SIZE));
+        if (currentPage > totalPages) currentPage = totalPages;
+
+        const start = (currentPage - 1) * PAGE_SIZE;
+        const end = start + PAGE_SIZE;
+        const pageData = filteredLogs.slice(start, end);
+
+        // 건수 정보 업데이트
+        countInfo.textContent = `총 ${filteredLogs.length}건 중 ${start + 1}~${Math.min(end, filteredLogs.length)}건 표시`;
+
+        // 테이블 렌더링
+        if (pageData.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">검색된 로그가 없습니다.</td></tr>';
+        } else {
+          tbody.innerHTML = pageData.map(l => {
+            const badgeClass = l.status === 'PASS' ? 'badge-success' : 'badge-danger';
+            const badgeIcon = l.status === 'PASS' ? '🟢' : '🔴';
+            const promptData = l.generated_prompt ? l.generated_prompt.replace(/"/g, '&quot;') : '';
+            return `
+              <tr>
+                <td style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-muted);">${l.id}</td>
+                <td><a href="/?symbol=${l.symbol}" class="log-symbol-link">${l.symbol}</a></td>
+                <td><span class="badge ${badgeClass}">${badgeIcon} ${l.status}</span></td>
+                <td>${l.created_at ? l.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
+                <td><button class="secondary-btn-sm view-prompt-btn" data-prompt="${promptData}">프롬프트 보기</button></td>
+              </tr>
+            `;
+          }).join('');
+        }
+
+        // 페이지네이션 렌더링
+        renderPagination(totalPages);
+      }
+
+      // 페이지네이션 버튼 생성
+      function renderPagination(totalPages) {
+        if (totalPages <= 1) { paginationBar.innerHTML = ''; return; }
+
+        let btns = '';
+        // 이전 버튼
+        btns += `<button class="tag-btn page-btn" data-page="${Math.max(1, currentPage - 1)}" ${currentPage === 1 ? 'disabled style="opacity:0.3;cursor:default;"' : ''}>◀ 이전</button>`;
+
+        // 페이지 번호 (최대 7개 표시)
+        let startP = Math.max(1, currentPage - 3);
+        let endP = Math.min(totalPages, startP + 6);
+        if (endP - startP < 6) startP = Math.max(1, endP - 6);
+
+        for (let i = startP; i <= endP; i++) {
+          const activeStyle = i === currentPage ? 'background: rgba(96, 165, 250, 0.3); color: #60a5fa; font-weight: 700;' : '';
+          btns += `<button class="tag-btn page-btn" data-page="${i}" style="min-width: 2.2rem; ${activeStyle}">${i}</button>`;
+        }
+
+        // 다음 버튼
+        btns += `<button class="tag-btn page-btn" data-page="${Math.min(totalPages, currentPage + 1)}" ${currentPage === totalPages ? 'disabled style="opacity:0.3;cursor:default;"' : ''}>다음 ▶</button>`;
+
+        paginationBar.innerHTML = btns;
+      }
+
+      // 이벤트 바인딩: 필터 변경
+      filterSelect.addEventListener('change', (e) => applyFilter(e.target.value));
+
+      // 이벤트 바인딩: 페이지네이션 클릭
+      paginationBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.page-btn');
+        if (btn && !btn.disabled) {
+          currentPage = parseInt(btn.getAttribute('data-page'));
+          renderPage();
+        }
+      });
+
+      // 이벤트 바인딩: 프롬프트 보기 버튼
+      tbody.addEventListener('click', (e) => {
+        const btn = e.target.closest('.view-prompt-btn');
+        if (btn) {
+          modalText.value = btn.getAttribute('data-prompt') || '(프롬프트 데이터 없음)';
+          modalBackdrop.classList.remove('hidden');
+        }
+      });
+
+      // 이벤트 바인딩: 모달 닫기
+      modalClose.addEventListener('click', () => modalBackdrop.classList.add('hidden'));
+      modalBackdrop.addEventListener('click', (e) => {
+        if (e.target === modalBackdrop) modalBackdrop.classList.add('hidden');
+      });
+
+      // 초기 렌더링
+      applyFilter('ALL');
+    });
   </script>
 </body>
 </html>
