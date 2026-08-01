@@ -3,7 +3,7 @@
 ## 1. 개요
 `Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집·가공하여 **PostgreSQL 데이터베이스에 적재**하고, 이를 멀티 에이전트(Multi-Agent) 기반으로 분석하여 시각화하는 **4-Tier (WEB-WAS-DB-Manager) 주식 분석 웹 서비스**입니다.
 
-macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`) 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
+macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **`_safe_read_file` 범용 파일 호환 로더** 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
 
 ---
 
@@ -13,14 +13,14 @@ macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536
 
 ```mermaid
 flowchart TD
-    %% 커스텀 색상 및 폰트 크기 스타일 정의
-    classDef pythonEngine fill:#1e3a8a,stroke:#60a5fa,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
-    classDef dbStorage fill:#064e3b,stroke:#34d399,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
-    classDef agentManager fill:#831843,stroke:#f472b6,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
+    %% 수직 순차 흐름 및 큼직한 폰트(16px, bold) 스타일 정의
+    classDef pythonEngine fill:#1e3a8a,stroke:#60a5fa,stroke-width:2.5px,color:#ffffff,font-size:16px,font-weight:bold;
+    classDef dbStorage fill:#064e3b,stroke:#34d399,stroke-width:2.5px,color:#ffffff,font-size:16px,font-weight:bold;
+    classDef agentManager fill:#831843,stroke:#f472b6,stroke-width:2.5px,color:#ffffff,font-size:16px,font-weight:bold;
     classDef webServer fill:#1e293b,stroke:#94a3b8,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
 
     %% 1단계: DB 중심 초고속 증분 수집 및 DB 직행 적재
-    subgraph Step1 ["1단계: 0.5초 DB 중심 증분 수집 (DB-Centric Bulk Ingestion)"]
+    subgraph Step1 ["1단계: 0.5초 DB 중심 증분 수집 (Delta Ingestion)"]
         direction TB
         FDR[/"🌐 FinanceDataReader API"/] -->|0.5초 일괄 증분 수집| GetFDR["🐍 get_fdr.py<br>(DB MAX date 탐지)"]
         GetFDR -->|증분 델타 직행 적재| DB_Raw[("💾 DB: raw_stock_data")]
@@ -35,7 +35,7 @@ flowchart TD
     end
 
     %% 3단계: 시계열 클러스터링
-    subgraph Step3 ["3단계: 시가총액 & 시계열 클러스터링"]
+    subgraph Step3 ["3단계: 시가총액 & 시계열 클러스터링 (_safe_read_file 적용)"]
         direction TB
         ProcessM1["🐍 process_m1_cap.py<br>(시가총액 데이터 가공)"] -->|시총 저장| DB_Cap[("💾 DB: market_cap")]
         ProcessM1 -->|정규화| ProcessC1["🐍 process_c1.py<br>(1d/1w/1m Z-Score 산출)"]
@@ -54,13 +54,10 @@ flowchart TD
         SecAgent["🤖 Manager: WebSecurityAgent<br>(WEB-WAS-DB 취약점 탐지)"] -.- WAS
     end
 
-    %% [DB 핀포인트 흐름 연계선 (어떤 DB -> 어떤 DB/모듈)]
-    DB_Raw ==>|1. raw_stock_data 읽기| ProcessA1
-    DB_Raw ==>|2. raw_stock_data 읽기| ProcessM1
-    DB_Raw ==>|3. 5일 raw_stock_data 읽기| PromptAgent
-    DB_Tech ==>|4. technical_indicators 퀀트 공급| PromptAgent
-    DB_Signal ==>|5. trading_signals 시그널 조회| WAS
-    DB_Cluster ==>|6. clustering_results 3D 조회| WAS
+    %% [위에서 아래로 이어지는 수직 메인 데이터 흐름선]
+    Step1 ==>|1. raw_stock_data 공급| Step2
+    Step1 ==>|2. raw_stock_data 공급| Step3
+    Step2 & Step3 ==>|3. 분석 지표/시그널/군집 공급| Step4
 
     %% 노드 스타일 지정 (.py: 파란색, DB: 녹색, 에이전트: 핑크, Web/WAS: 슬레이트)
     class GetFDR,ProcessA1,ProcessB3,ProcessM1,ProcessC1,ProcessC2 pythonEngine;
@@ -73,7 +70,7 @@ flowchart TD
 
 ### 2.2 개체 관계도 (ER Diagram)
 
-PostgreSQL 데이터베이스 7개 핵심 테이블 간의 키(PK/UK) 구조와 연관 관계입니다.
+PostgreSQL 데이터베이스 7개 핵심 테이블 간의 수직 방사형 연관 관계입니다.
 
 ```mermaid
 erDiagram
@@ -126,7 +123,7 @@ erDiagram
         varchar status
     }
 
-    %% 키 기준 방사형 연결 관계
+    %% 수직 순차 방사형 관계 배치
     RAW_STOCK_DATA ||--|| MARKET_CAP : "일별 시총"
     RAW_STOCK_DATA ||--o{ TECHNICAL_INDICATORS : "보조 지표"
     RAW_STOCK_DATA ||--o{ TRADING_SIGNALS : "분석 시그널"
