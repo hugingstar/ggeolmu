@@ -3,7 +3,7 @@
 ## 1. 개요
 `Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집·가공하여 **PostgreSQL 데이터베이스에 적재**하고, 이를 멀티 에이전트(Multi-Agent) 기반으로 분석하여 시각화하는 **4-Tier (WEB-WAS-DB-Manager) 주식 분석 웹 서비스**입니다.
 
-macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **`_safe_read_file` 범용 파일 호환 로더** 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
+macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **`get_dynamic_cluster_config()` 동적 자원 자동 감지 모듈**, **`Database/queries/` 14개 SQL 다중 자동 로딩**, **`_safe_read_file` 범용 파라미터 파일 호환 로더** 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
 
 ---
 
@@ -23,13 +23,13 @@ flowchart TD
     subgraph Step1 ["1단계: 0.5초 DB 중심 증분 수집 (Delta Ingestion)"]
         direction TB
         FDR[/"🌐 FinanceDataReader API"/] -->|0.5초 일괄 증분 수집| GetFDR["🐍 get_fdr.py<br>(DB MAX date 탐지)"]
-        GetFDR -->|증분 델타 직행 적재| DB_Raw[("💾 DB: raw_stock_data")]
+        GetFDR -->|증분 델타 직행 적재| DB_Raw[("💾 DB: raw_stock_data<br>(14개 SQL 중앙 관리)")]
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
-    subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dask 16GB RAM 튜닝)"]
+    subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dynamic RAM Control)"]
         direction TB
-        ProcessA1["🐍 process_a1.py<br>(MA, RSI, MACD / 4 Workers)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
+        ProcessA1["🐍 process_a1.py<br>(Dynamic RAM Control / MA,RSI,MACD)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
         ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py<br>(상승/하락/다이버전스 시그널)"]
         ProcessB3 -->|시그널 저장| DB_Signal[("💾 DB: trading_signals")]
     end
@@ -138,7 +138,7 @@ erDiagram
 
 - **WEB Tier (`Web/`)**: Vanilla JS 및 CSS Glassmorphism 기반 SPA. 반응형 상대 크기 조절 레이아웃 적용.
 - **WAS Tier (`WAS/app.py`)**: FastAPI 기반 비동기 REST API 서빙 및 정적 웹 리소스 제공.
-- **DB Tier (`Database/`)**: PostgreSQL DBMS. `queries/001_`~`014_` 수록 SQL 파일로 쿼리 중앙 관리 (SQL Injection 방지).
+- **DB Tier (`Database/`)**: PostgreSQL DBMS. `Database/queries/` 수록 `001_`~`014_` SQL 쿼리 중앙 통합 관리 (SQL Injection 방지).
 - **Manager Tier (`Manager/`)**:
   - `AuditAgent`: 불필요 종목(ETF/SPAC) 필터링 및 프롬프트 주입/SQLi 검사.
   - `PromptMakerAgent`: 5일 주가 흐름 기반 퀀트 메타 프롬프트 일괄 생성.
@@ -146,7 +146,18 @@ erDiagram
 
 ---
 
-## 4. 실행 방법
+## 4. 파이프라인 핵심 기술 특장점 (Key Features)
+
+1. **동적 자원 자동 스케일링 (`get_dynamic_cluster_config`)**
+   - 하드웨어 RAM과 CPU 코어 수를 자동 측정하여 Dask 클러스터를 동적 튜닝합니다. (16GB Mac: 2 Workers / 6GB limit, 32GB/64GB+ 서버: 4~16 Workers 유연 스케일링)
+2. **PostgreSQL DB-Centric 초고속 직행 적재**
+   - `fdr.StockListing` 기반 0.5초 일괄 증분 수집 및 DB 최신일(`SELECT MAX(date)`) 직행 쿼리 조회를 결합하여 1초 만에 최신 시세를 DB에 반영합니다.
+3. **범용 파일 호환 로더 (`_safe_read_file`)**
+   - `.parquet` 및 `.csv` 파티션 파일 손상 방지 및 인코딩 2차 폴백(`utf-8-sig` ➡ `cp949`)을 적용하여 파이프라인 무결성을 유지합니다.
+
+---
+
+## 5. 실행 방법
 
 ### 1) PostgreSQL DB 구동
 ```bash
