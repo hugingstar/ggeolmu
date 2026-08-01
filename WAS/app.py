@@ -47,22 +47,52 @@ class PromptResponse(BaseModel):
 def startup_event():
     db.initialize_tables()
 
+def _resolve_to_canonical_symbol(input_str: str) -> str:
+    """
+    종목명(삼성전자) 또는 종목코드(005930) 입력 시 항상 canonical symbol(종목코드)로 반환.
+    DB raw_stock_data에서 name 또는 symbol로 매칭하여 종목코드를 통일합니다.
+    매칭 실패 시 원본 입력 그대로 반환 (해외종목 AAPL 등 지원).
+    """
+    if not input_str:
+        return input_str
+    cleaned = input_str.strip()
+    try:
+        # 1차: symbol 컬럼에서 정확 매칭 (이미 종목코드인 경우)
+        rows = db.read_query_direct(
+            "SELECT symbol FROM public.raw_stock_data WHERE symbol = %s LIMIT 1;", (cleaned,)
+        )
+        if rows and rows[0]:
+            return rows[0][0]
+
+        # 2차: name 컬럼에서 정확 매칭 (종목명으로 검색한 경우)
+        rows = db.read_query_direct(
+            "SELECT symbol FROM public.raw_stock_data WHERE name = %s LIMIT 1;", (cleaned,)
+        )
+        if rows and rows[0]:
+            return rows[0][0]
+    except Exception:
+        pass
+    return cleaned
+
 @app.get("/api/prompt", response_model=PromptResponse)
 def get_prompt_for_symbol(symbol: str = Query(..., description="종목 코드 또는 이름")):
+    # 종목명/종목코드를 canonical symbol(종목코드)로 정규화
+    canonical = _resolve_to_canonical_symbol(symbol)
+
     tier_audit = security_manager.inspect_all_tiers(symbol)
     if not tier_audit["is_safe"]:
-        db.write_query("004_insert_prompt_log.sql", (symbol, None, "REJECTED"))
+        db.write_query("004_insert_prompt_log.sql", (canonical, None, "REJECTED"))
         return PromptResponse(
-            symbol=symbol,
+            symbol=canonical,
             is_valid=False,
             audit_reason=f"[{tier_audit['failed_tier']} 취약점 감지] {tier_audit['details']['reason']}"
         )
 
     audit_res = audit_agent.audit_stock(symbol)
     if not audit_res["is_valid"]:
-        db.write_query("004_insert_prompt_log.sql", (symbol, None, "REJECTED"))
+        db.write_query("004_insert_prompt_log.sql", (canonical, None, "REJECTED"))
         return PromptResponse(
-            symbol=symbol,
+            symbol=canonical,
             is_valid=False,
             audit_reason=audit_res["reason"]
         )
@@ -70,16 +100,16 @@ def get_prompt_for_symbol(symbol: str = Query(..., description="종목 코드 �
     meta_prompt = prompt_maker.generate_prompt(symbol)
     prompt_audit = audit_agent.audit_prompt(meta_prompt)
     if not prompt_audit["is_safe"]:
-        db.write_query("004_insert_prompt_log.sql", (symbol, meta_prompt, "REJECTED"))
+        db.write_query("004_insert_prompt_log.sql", (canonical, meta_prompt, "REJECTED"))
         return PromptResponse(
-            symbol=symbol,
+            symbol=canonical,
             is_valid=False,
             audit_reason=f"생성된 프롬프트가 안전하지 않습니다: {prompt_audit['reason']}"
         )
 
-    db.write_query("004_insert_prompt_log.sql", (symbol, meta_prompt, "PASS"))
+    db.write_query("004_insert_prompt_log.sql", (canonical, meta_prompt, "PASS"))
     return PromptResponse(
-        symbol=symbol,
+        symbol=canonical,
         is_valid=True,
         audit_reason="안전 (검토 통과)",
         generated_prompt=meta_prompt
