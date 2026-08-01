@@ -5,15 +5,51 @@ from dask.distributed import Client
 from datetime import datetime
 
 # ======================================================================
-# 클러스터 / 파티션 설정
-# ======================================================================
-CLUSTER_CONFIG = {
-    "n_workers": 4,
-    "threads_per_worker": 2,
-    "memory_limit": "3GB",
-    "npartitions": 16,
-    "use_persist": False,
-}
+import psutil
+import dask
+
+def get_dynamic_cluster_config():
+    """
+    현재 시스템의 RAM과 CPU 코어 수를 감지하여
+    Dask 메모리 초과/워커 킬 현상을 방지하는 동적 클러스터 설정 반환
+    """
+    total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+    cpu_cores = os.cpu_count() or 4
+    
+    if total_ram_gb <= 20:
+        n_workers = 2
+        threads_per_worker = max(2, cpu_cores // 2)
+        memory_limit = f"{int(total_ram_gb * 0.4)}GB"
+        npartitions = 8
+    elif total_ram_gb <= 40:
+        n_workers = 4
+        threads_per_worker = 2
+        memory_limit = "6GB"
+        npartitions = 16
+    else:
+        n_workers = 8
+        threads_per_worker = 2
+        memory_limit = "8GB"
+        npartitions = 32
+
+    # Dask Nanny 메모리 하드 킬 방지
+    dask.config.set({
+        "distributed.worker.memory.target": 0.70,
+        "distributed.worker.memory.spill": 0.85,
+        "distributed.worker.memory.pause": 0.90,
+        "distributed.worker.memory.terminate": False
+    })
+
+    return {
+        "n_workers": n_workers,
+        "threads_per_worker": threads_per_worker,
+        "memory_limit": memory_limit,
+        "npartitions": npartitions,
+        "use_persist": False,
+    }
+
+# 시스템 동적 맞춤 클러스터 설정
+CLUSTER_CONFIG = get_dynamic_cluster_config()
 
 class DaskProcessor:
     """
