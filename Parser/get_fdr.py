@@ -4,7 +4,10 @@ from dask import delayed
 import pandas as pd
 import time
 import os
+import sys
 import random
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +115,7 @@ def fetch_stock_data(symbol, name, start_date, fdr_prefix=None, sleep_interval=0
 def get_db_max_date():
     """PostgreSQL public.raw_stock_data 테이블에서 최신 수집 일자를 안전하게 조회"""
     try:
-        from db_manager import DBManager
+        from Database.db_manager import DBManager
         db = DBManager()
         if db.conn:
             rows = db.read_query_direct("SELECT MAX(date) FROM public.raw_stock_data;")
@@ -146,21 +149,34 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
     # 1. DB 최신 날짜 우선 탐지 (Parquet 파일 의존성 제거)
     max_date = get_db_max_date()
     
-    # 2. DB에 기록이 없으면 로컬 Parquet 확인
-    if max_date is None and os.path.exists(parquet_path):
-        try:
-            existing_df = pd.read_parquet(parquet_path)
-            if not existing_df.empty and 'Date' in existing_df.columns:
-                existing_df['Date'] = pd.to_datetime(existing_df['Date'])
-                max_date = existing_df['Date'].max()
-        except Exception as e:
-            existing_df = None
-
+    # 2. 실제 최근 영업일 파악 (시차 및 주말/휴장일 동기화)
+    benchmark_symbol = "005930" if market_name in ["KOSPI", "KOSDAQ"] else "AAPL"
+    try:
+        # 최근 7일치 데이터를 가져와서 가장 마지막 날짜(영업일) 확인
+        start_check = (pd.Timestamp.now() - pd.Timedelta(days=7)).strftime('%Y-%m-%d')
+        bm_df = fdr.DataReader(benchmark_symbol, start_check)
+        if not bm_df.empty:
+            actual_latest_date = bm_df.index.max()
+        else:
+            actual_latest_date = pd.Timestamp.now().normalize()
+            if actual_latest_date.weekday() >= 5:  # 주말이면 금요일로 보정
+                actual_latest_date -= pd.Timedelta(days=actual_latest_date.weekday() - 4)
+    except Exception:
+        actual_latest_date = pd.Timestamp.now().normalize()
+        if actual_latest_date.weekday() >= 5:
+            actual_latest_date -= pd.Timedelta(days=actual_latest_date.weekday() - 4)
+    
+    # DB 최신 날짜와 실제 최근 영업일 비교 (스킵 여부 결정)
     if max_date is not None and pd.notnull(max_date):
-        days_diff = (pd.Timestamp.now() - max_date).days
-        if days_diff <= 14:
+        if actual_latest_date <= max_date:
+            print(f"[{market_name}] DB 최신 일자({max_date.strftime('%Y-%m-%d')})가 이미 실제 최근 영업일({actual_latest_date.strftime('%Y-%m-%d')})과 동일하거나 앞섭니다. 업데이트 스킵.", flush=True)
+            return None, pd.DataFrame()
+        
+        days_diff = (actual_latest_date - max_date).days
+        if days_diff <= 14 and market_name in ["KOSPI", "KOSDAQ"]: 
+            # 미국 마켓(NYSE/NASDAQ)은 StockListing에 가격 정보가 없으므로 Dask 개별 수집을 타도록 False로 유지
             is_delta_mode = True
-            print(f"[{market_name}] DB/스토리지 최신 날짜 감지 ({max_date.strftime('%Y-%m-%d')}). 0.5초 초고속 일괄 증분 수집(Bulk Fetch)을 실행합니다.")
+            print(f"[{market_name}] 0.5초 초고속 일괄 증분 수집(Bulk Fetch)을 실행합니다. (Target Date: {actual_latest_date.strftime('%Y-%m-%d')})")
 
     new_df = None
 
@@ -175,6 +191,7 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
                 if code_col not in listing_df.columns and "Code" in listing_df.columns:
                     code_col = "Code"
                 
+                # fdr.StockListing() KOSPI/KOSDAQ의 경우 'Changes'가 절대가격차이, 'ChagesRatio'가 백분율 수익률임
                 rename_dict = {
                     code_col: 'Symbol',
                     'Name': 'Name',
@@ -183,17 +200,23 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
                     'Low': 'Low',
                     'Close': 'Close',
                     'Volume': 'Volume',
-                    'Chg': 'Change',
-                    'Changes': 'Change'
                 }
                 
                 bulk_df = listing_df.rename(columns=rename_dict).copy()
                 
+                # 올바른 등락률 매핑 로직 (ChagesRatio -> Change)
+                if 'ChagesRatio' in bulk_df.columns:
+                    bulk_df['Change'] = pd.to_numeric(bulk_df['ChagesRatio'], errors='coerce') / 100.0
+                elif 'Chg' in bulk_df.columns:
+                    bulk_df['Change'] = pd.to_numeric(bulk_df['Chg'], errors='coerce') / 100.0
+                else:
+                    bulk_df['Change'] = 0.0
+                
                 if cfg.get("pad_zero", False) and 'Symbol' in bulk_df.columns:
                     bulk_df['Symbol'] = bulk_df['Symbol'].astype(str).str.zfill(6)
                 
-                today_str = pd.Timestamp.now().strftime('%Y-%m-%d')
-                bulk_df['Date'] = pd.to_datetime(today_str)
+                # 무조건 오늘이 아닌 실제 영업일 사용
+                bulk_df['Date'] = pd.to_datetime(actual_latest_date)
                 
                 req_cols = ['Date', 'Symbol', 'Name', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change']
                 for col in req_cols:
