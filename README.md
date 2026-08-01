@@ -149,11 +149,21 @@ erDiagram
 ## 4. 파이프라인 핵심 기술 특장점 (Key Features)
 
 1. **동적 자원 자동 스케일링 (`get_dynamic_cluster_config`)**
-   - 하드웨어 RAM과 CPU 코어 수를 자동 측정하여 Dask 클러스터를 동적 튜닝합니다. (16GB Mac: 2 Workers / 6GB limit, 32GB/64GB+ 서버: 4~16 Workers 유연 스케일링)
+   - 하드웨어 RAM과 CPU 코어 수를 자동 측정하여 Dask 클러스터를 동적 튜닝합니다.
 2. **PostgreSQL DB-Centric 초고속 직행 적재**
    - `fdr.StockListing` 기반 0.5초 일괄 증분 수집 및 DB 최신일(`SELECT MAX(date)`) 직행 쿼리 조회를 결합하여 1초 만에 최신 시세를 DB에 반영합니다.
 3. **범용 파일 호환 로더 (`_safe_read_file`)**
    - `.parquet` 및 `.csv` 파티션 파일 손상 방지 및 인코딩 2차 폴백(`utf-8-sig` ➡ `cp949`)을 적용하여 파이프라인 무결성을 유지합니다.
+
+---
+
+### 🖥️ 기기 스펙별 자동 유연 변환 및 Dask 병렬 컴퓨팅 장점
+
+| 구동 자원 환경 | 감지된 물리 RAM & CPU | 자동 튜닝 클러스터 스펙 | 병렬 컴퓨팅(Parallel Computing) 주요 장점 |
+| :--- | :--- | :--- | :--- |
+| **개발 및 테스트 환경**<br>(MacBook 16GB RAM) | `RAM: 16GB`<br>`CPU: 8 Core` | **`n_workers: 2`**<br>**`memory_limit: 6GB`**<br>`threads: 6` | - 메모리를 워커당 **6GB로 2배 확대**하여 메모리 킬 소멸<br>- 2,463개 종목 지표 계산 시 스레드 분산 병렬 처리 |
+| **고성능 PC / 워크스테이션**<br>(32GB RAM 장비) | `RAM: 32GB`<br>`CPU: 12~16 Core` | **`n_workers: 4`**<br>**`memory_limit: 6GB`**<br>`threads: 2` | - 워커를 4개로 확장하여 **지표 가공 연산 속도 2배 향상**<br>- CPU 코어 멀티프로세싱 병렬 수집 |
+| **클라우드 / 온프레미스**<br>(64GB~128GB+ 서버) | `RAM: 64GB+`<br>`CPU: 32 Core+` | **`n_workers: 8~16`**<br>**`memory_limit: 8GB~16GB`**<br>`npartitions: 32` | - 대규모 분산 컴퓨팅 모드로 수천 종목을 **수초 만에 연산**<br>- 코드 수정 없는 **Zero-Config 클라우드 확장** |
 
 ---
 
