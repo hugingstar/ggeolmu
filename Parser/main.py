@@ -70,6 +70,23 @@ class FinancePipeline:
             print(f"[Warning] Failed to read {path}: {e}")
             return pd.DataFrame()
 
+    @staticmethod
+    def _safe_read_file(path: str) -> pd.DataFrame:
+        """.parquet 및 .csv 확장자를 자동 판별하여 안전하게 DataFrame으로 반환"""
+        if not os.path.exists(path):
+            return pd.DataFrame()
+        try:
+            if path.endswith('.parquet'):
+                return pd.read_parquet(path)
+            else:
+                try:
+                    return pd.read_csv(path, encoding='utf-8-sig')
+                except UnicodeDecodeError:
+                    return pd.read_csv(path, encoding='cp949')
+        except Exception as e:
+            print(f"[Warning] 파일 읽기 실패 ({path}): {e}")
+            return pd.DataFrame()
+
     def _get_target_dates(self, market: str):
         """현재 시점을 기준으로 마켓별 필요 날짜(target_date, today_date, start_date_5d)를 계산합니다."""
         now = datetime.now(self.kst)
