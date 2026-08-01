@@ -436,8 +436,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  }
-
   // Initial Load
   loadClusteringData('ALL');
 });

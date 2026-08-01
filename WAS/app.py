@@ -21,7 +21,56 @@ from agents.audit_agent import AuditAgent
 from agents.prompt_maker_agent import PromptMakerAgent
 from security_manager import SecurityManager
 
+import json
+import redis
+
 app = FastAPI(title="Ggeolmu 4-Tier Standalone WAS API Server")
+
+# Redis 클라이언트 초기화 (Cache-Aside용)
+redis_client = None
+try:
+    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    redis_client.ping()
+    print("[Redis] 인메모리 캐시 서버 연결 성공 (localhost:6379)")
+except Exception as e:
+    print(f"[Redis] 연결 실패: {e}")
+    redis_client = None
+
+def cache_response(key_prefix: str, ttl: int = 60):
+    """Redis 캐시-어사이드 패턴을 적용하는 데코레이터"""
+    def decorator(func):
+        import functools
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if not redis_client:
+                return func(*args, **kwargs)
+            
+            # 파라미터 조합으로 유니크 키 생성
+            key_parts = [key_prefix]
+            for k, v in sorted(kwargs.items()):
+                key_parts.append(f"{k}={v}")
+            cache_key = ":".join(key_parts)
+            
+            # 1. Redis 캐시 확인 (Read-Through)
+            try:
+                cached_data = redis_client.get(cache_key)
+                if cached_data:
+                    return json.loads(cached_data)
+            except Exception as e:
+                print(f"[Redis Get Error] {e}")
+                
+            # 2. 캐시 미스 시 DB/원본 함수 실행
+            result = func(*args, **kwargs)
+            
+            # 3. Redis 캐시 저장
+            try:
+                redis_client.setex(cache_key, ttl, json.dumps(result, ensure_ascii=False))
+            except Exception as e:
+                print(f"[Redis Set Error] {e}")
+                
+            return result
+        return wrapper
+    return decorator
 
 app.add_middleware(
     CORSMiddleware,
@@ -177,15 +226,18 @@ def get_stock_detail(symbol: str, days: int = Query(30, description="조회 기�
     } for r in records]
     history.reverse()
 
-    # Calculate Buy (BUY 🟢) / Sell (SELL 🔴) signals based on price momentum & change
+    # DB에서 실제 트레이딩 시그널 가져오기
+    signal_records = db.read_query_direct(
+        "SELECT date, signal_type FROM public.trading_signals WHERE symbol = %s ORDER BY date DESC LIMIT %s;", 
+        (clean_symbol, limit_days * 2) # 여유 있게
+    )
+    signal_dict = {}
+    if signal_records:
+        for r in signal_records:
+            signal_dict[str(r[0])] = r[1]
+
     for i, item in enumerate(history):
-        item["signal"] = "NEUTRAL"
-        if i > 0 and history[i-1]["close"] and item["close"]:
-            diff = (item["close"] - history[i-1]["close"]) / history[i-1]["close"]
-            if diff >= 0.015:
-                item["signal"] = "BUY"
-            elif diff <= -0.015:
-                item["signal"] = "SELL"
+        item["signal"] = signal_dict.get(item["date"], "NEUTRAL")
     
     res = {
         "symbol": clean_symbol,
@@ -265,6 +317,7 @@ def _get_stock_display_name(symbol: str) -> str:
     return symbol_str
 
 @app.get("/api/analytics")
+@cache_response("analytics_dashboard", ttl=60)
 def get_query_analytics():
     """
     데이터 조회 건수 및 SQL Query vs Distributed Computing 균형 관제 데이터를 반환합니다.
@@ -322,6 +375,7 @@ def get_audit_logs(limit: int = 50, offset: int = 0):
     } for r in records]
 
 @app.get("/api/stats")
+@cache_response("system_stats", ttl=60)
 def get_system_stats():
     try:
         total_rows = db.read_query_direct("SELECT COUNT(*) FROM public.raw_stock_data;")[0][0]
@@ -357,6 +411,7 @@ def get_security_report():
     return security_manager.get_security_summary()
 
 @app.get("/api/clustering")
+@cache_response("clustering_data", ttl=3600)
 def get_clustering_data(market: str = Query("ALL", description="시장 선택 (ALL, KOSPI, KOSDAQ, NASDAQ, NYSE)")):
     """
     PostgreSQL public.clustering_results 및 zscore_features 기반 시계열 군집화 및 군집별 소속 종목 데이터를 반환합니다.

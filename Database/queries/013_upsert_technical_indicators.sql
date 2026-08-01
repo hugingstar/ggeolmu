@@ -3,9 +3,7 @@
 
 INSERT INTO public.technical_indicators (
     date, symbol, name, market, ma5, ma20, ma60, ma120, ma200, rsi, macd, macd_signal, adx, bollinger_high, bollinger_low
-) VALUES (
-    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-)
+) VALUES %s
 ON CONFLICT (date, symbol) 
 DO UPDATE SET
     name = EXCLUDED.name,

@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         chartArea.innerHTML = renderSvgChartWithSignals(detailData.history);
 
-        stockTbody.innerHTML = detailData.history.slice(-30).map(h => {
+        stockTbody.innerHTML = detailData.history.slice().reverse().map(h => {
           let sigBadge = '<span class="sig-tag sig-neutral">보유</span>';
           if (h.signal === 'BUY') sigBadge = '<span class="sig-tag sig-buy">🟢 매수</span>';
           if (h.signal === 'SELL') sigBadge = '<span class="sig-tag sig-sell">🔴 매도</span>';

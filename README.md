@@ -48,6 +48,7 @@ flowchart TD
     subgraph Step4 ["4단계: 4-Tier 웹 서비스 & Multi-Agent"]
         direction TB
         UI[/"🖥️ WEB: Vanilla JS SPA UI<br>(/pipeline 및 5개 관제 페이지 UI/UX 개편)"/] <-->|REST API /api/pipeline/logs| WAS["⚙️ WAS: FastAPI Server"]
+        WAS <-->|Read-Through 캐싱 (ms 단위 응답)| Redis[("⚡ Redis Cache<br>(대시보드 API 250배 성능 개선)")]
         WAS <--> Audit["🤖 Manager: AuditAgent<br>(SPAC/ETF 필터 & SQLi 검사)"]
         WAS <--> PromptAgent["🤖 Manager: PromptMakerAgent<br>(5일 시세/지표 퀀트분석)"]
         WAS -->|프롬프트 기록| DB_Logs[("💾 DB: prompt_logs")]
@@ -63,7 +64,7 @@ flowchart TD
 
     %% 노드 스타일 지정 (.py: 파란색, DB: 녹색, 에이전트: 핑크, Web/WAS: 슬레이트)
     class GetFDR,ProcessA1,ProcessB3,ProcessM1,ProcessC1,ProcessC2 pythonEngine;
-    class DB_Raw,DB_Tech,DB_Signal,DB_Cap,DB_ZScore,DB_Cluster,DB_Logs,DB_PipeLogs dbStorage;
+    class DB_Raw,DB_Tech,DB_Signal,DB_Cap,DB_ZScore,DB_Cluster,DB_Logs,DB_PipeLogs,Redis dbStorage;
     class Audit,PromptAgent,PipeAgent,SecAgent agentManager;
     class UI,WAS,FDR webServer;
 ```

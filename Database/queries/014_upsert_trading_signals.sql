@@ -3,9 +3,7 @@
 
 INSERT INTO public.trading_signals (
     date, symbol, name, market, signal_type, signal_strength, description
-) VALUES (
-    %s, %s, %s, %s, %s, %s, %s
-)
+) VALUES %s
 ON CONFLICT (date, symbol, signal_type) 
 DO UPDATE SET
     name = EXCLUDED.name,

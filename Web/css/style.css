@@ -225,6 +225,9 @@ header p {
   border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: 1.25rem;
   padding: 1.5rem;
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .panel-header {

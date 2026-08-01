@@ -328,8 +328,13 @@ class FinancePipeline:
     # ==========================================================
     def _upsert_a1(self, market):
         print(f"[*] A1Sheet DB 적재 시작: {market}")
-        from db_manager import DBManager
+        import sys
         import os
+        import re
+        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Database')
+        if db_path not in sys.path:
+            sys.path.insert(0, db_path)
+        from db_manager import DBManager
         db = DBManager()
         a1_path = f"{self.base_path}/{market}/A1Sheet"
         if os.path.exists(a1_path):
@@ -342,8 +347,19 @@ class FinancePipeline:
                         if 'Name' not in df.columns:
                             name_part = file.split('(')[0]
                             df['Name'] = name_part
-                        db.upsert_stocks(df)
-                        db.upsert_daily_prices(df)
+                        if 'Symbol' not in df.columns:
+                            # 파일명 "삼성전자(005930).parquet"에서 "005930" 추출
+                            match = re.search(r'\((.*?)\)', file)
+                            if match:
+                                df['Symbol'] = match.group(1)
+                            else:
+                                df['Symbol'] = file.split('.')[0]
+                        # DB 컬럼명 매핑 (BB_Upper -> Bollinger_High, BB_Lower -> Bollinger_Low)
+                        if 'BB_Upper' in df.columns:
+                            df.rename(columns={'BB_Upper': 'Bollinger_High'}, inplace=True)
+                        if 'BB_Lower' in df.columns:
+                            df.rename(columns={'BB_Lower': 'Bollinger_Low'}, inplace=True)
+
                         db.upsert_technical_indicators(df)
 
     def _upsert_b1(self, market, now, start_date_5d):
