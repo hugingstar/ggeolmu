@@ -290,7 +290,7 @@ if __name__ == "__main__":
     CONFIG1 = {
         "start_date": "2000-01-01",
         "num_stocks": 4000,
-        "output_path": "C:/Users/yslee/PycharmProjects/FinanceMLOps/Data/KOSPI",
+        "output_path": "Data/KOSPI",
         "market_name": "KOSPI",
         "sleep_interval": 0.05
     }
@@ -298,7 +298,7 @@ if __name__ == "__main__":
     CONFIG2 = {
         "start_date": "2000-01-01",
         "num_stocks": 4000,
-        "output_path": "C:/Users/yslee/PycharmProjects/FinanceMLOps/Data/KOSDAQ",
+        "output_path": "Data/KOSDAQ",
         "market_name": "KOSDAQ",
         "sleep_interval": 0.05
     }
@@ -306,7 +306,7 @@ if __name__ == "__main__":
     CONFIG3 = {
         "start_date": "2000-01-01",
         "num_stocks": 4000,
-        "output_path": "C:/Users/yslee/PycharmProjects/FinanceMLOps/Data/NASDAQ",
+        "output_path": "Data/NASDAQ",
         "market_name": "NASDAQ",
         "sleep_interval": 0.05
     }
@@ -314,7 +314,7 @@ if __name__ == "__main__":
     CONFIG4 = {
         "start_date": "2000-01-01",
         "num_stocks": 4000,
-        "output_path": "C:/Users/yslee/PycharmProjects/FinanceMLOps/Data/NYSE",
+        "output_path": "Data/NYSE",
         "market_name": "NYSE",
         "sleep_interval": 0.05
     }

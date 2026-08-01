@@ -322,8 +322,6 @@ class run_cluster():
         
         print("Elbow results CSV saved at: {}".format(save_file))
 
-    # ------------------------------------------------------------------ #
-
     def create_folder(self, directory):
         try:
             if not os.path.exists(directory):
@@ -334,86 +332,85 @@ class run_cluster():
     def DataFiltering(self, data):
         return data
 
+# =========================================================================
+import sys
+import os
+
+def _safe_read_file(path):
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    try:
+        if path.endswith('.parquet'):
+            return pd.read_parquet(path)
+        else:
+            return pd.read_csv(path)
+    except Exception as e:
+        print(f"[Warning] Failed to read {path}: {e}")
+        return pd.DataFrame()
+
+_safe_read_csv = _safe_read_file
 
 if __name__ == '__main__':
+    if len(sys.argv) < 4:
+        print("Usage: python process_c2.py <market> <target_date> <base_path>")
+        sys.exit(1)
+
+    _market = sys.argv[1]
+    _target_date = sys.argv[2]
+    _base_path = sys.argv[3]
 
     # =========================================================================
-    # [에러 해결용 안전 로드 함수] numpy categorical 및 문자열(알파벳) 섞인 메타데이터 오류 우회
+    # 2. 통합 CONFIG 딕셔너리 (모든 환경 변수 및 파라미터 포함)
     # =========================================================================
-    def _safe_read_file(path):
-        import os
-        if not os.path.exists(path):
-            return pd.DataFrame()
-        try:
-            if path.endswith('.parquet'):
-                return pd.read_parquet(path)
-            else:
-                return pd.read_csv(path)
-        except Exception as e:
-            print(f"[Warning] Failed to read {path}: {e}")
-            return pd.DataFrame()
-
-    _safe_read_csv = _safe_read_file
+    CONFIG = {
+        # --- 환경 경로 및 기본 세팅 ---
+        'MARKET': _market, 
+        'TARGET_DATE': _target_date,
+        'BASE_PATH': _base_path,
+        'CAP_PATH': f"{_base_path}/{_market}/M1Sheet/{_target_date}/df_cap.csv",
+        'LOAD_PATH': f"{_base_path}/{_market}/C1Sheet/df_zscore_1w.csv",
+        'SAVE_PATH': f"{_base_path}/{_market}/C2Sheet/{_target_date}",
+        
+        # --- 시가총액 추출 및 필터링 설정 ---
+        'CAP_COLUMN': "MarketCap_KRW",             # df_cap.parquet에서 기준으로 삼을 시가총액 컬럼
+        'TOP_N': 1000,                             # 제외 단어 필터링 후 시가총액 기준 상위 N개 추출
+        'EXCLUDE_WORDS': [
+            "TIGER", "KODEX", "RISE", "TIME", "SOL", "ACE", "TDF", "ETN", "PLUS", 
+            "1Q", "KIWOOM", "KoAct", "WON", "HANARO", "KCGI", "FOCUS", "에셋플러스", 
+            "DAISHIN", "MIDAS", "TRUSTON", "스팩", "SPAC", "KOSEF", "Fund", "Unit", 
+            "Right", "Rights", "VIX", "국고채", "채권", "혼합", "KBSTAR", "KINDEX", 
+            "ARIRANG", "마이티", "TREX", "특수채", "회사채", "UNICORN", "2차전지양극재", 
+            "IBK K-AI", "액티브", "온디바이스AI", "인덱스", "Acquisition", "Warrant", 
+            "ETF", "Trust", "200"
+        ],
+        
+        # --- 클러스터링 기본 설정 ---
+        'TIME': 'Date',                            # 시간 인덱스명 설정
+        'SCALER': 'standard',                      # 'standard', 'min_max', 'robust', 'no_scaler'
+        'N_CLUSTER_RANGE': [2, 10],                 # KMeans K 범위
+        'METHOD': 'kmeans_softdtw',                # 'kmeans_dtw', 'kmeans_softdtw', 'kmeans_euclidean', 'dbscan_dtw', 'dbscan_softdtw'
+        
+        # --- 클러스터링 알고리즘 파라미터 ---
+        'DBSCAN_EPS': 0.5,                         # 반경
+        'DBSCAN_MIN_SAMPLES': 2,                   # 최소 샘플 수
+        'SOFT_DTW_GAMMA': 1.0,                     # 평활화 정도
+        
+        # --- 전처리 필터링 옵션 ---
+        'MIN_VALID_RATIO': 0.5,                    # 유효값 최소 비율
+        'DROP_CONSTANT': True                      # 상수 컬럼 제거 여부
+    }
 
     # =========================================================================
-    # 1. 동적 문자열 할당을 위한 기본 변수 (CONFIG에 맵핑 용도)
+    # 3. 데이터 로드 및 종목 사전 필터링 -> 상위 N개 추출 
     # =========================================================================
-    for mkm in ["KOSPI", "KOSDAQ", "NASDAQ", "NYSE"]:
-        _market = mkm 
-        _target_date = "2026-06-06"
-        _base_path = "C:/Users/yslee/PycharmProjects/FinanceMLOps/Data"
+    print(f"Loading Market Cap Data: {CONFIG['CAP_PATH']}")
+    df_cap = _safe_read_csv(CONFIG['CAP_PATH']) # 에러 우회 함수 적용
 
-        # =========================================================================
-        # 2. 통합 CONFIG 딕셔너리 (모든 환경 변수 및 파라미터 포함)
-        # =========================================================================
-        CONFIG = {
-            # --- 환경 경로 및 기본 세팅 ---
-            'MARKET': _market, 
-            'TARGET_DATE': _target_date,
-            'BASE_PATH': _base_path,
-            'CAP_PATH': f"{_base_path}/{_market}/M1Sheet/{_target_date}/df_cap.csv",
-            'LOAD_PATH': f"{_base_path}/{_market}/C1Sheet/df_zscore_1w.csv",
-            'SAVE_PATH': f"{_base_path}/{_market}/C2Sheet/{_target_date}",
-            
-            # --- 시가총액 추출 및 필터링 설정 ---
-            'CAP_COLUMN': "MarketCap_KRW",             # df_cap.parquet에서 기준으로 삼을 시가총액 컬럼
-            'TOP_N': 1000,                             # 제외 단어 필터링 후 시가총액 기준 상위 N개 추출
-            'EXCLUDE_WORDS': [
-                "TIGER", "KODEX", "RISE", "TIME", "SOL", "ACE", "TDF", "ETN", "PLUS", 
-                "1Q", "KIWOOM", "KoAct", "WON", "HANARO", "KCGI", "FOCUS", "에셋플러스", 
-                "DAISHIN", "MIDAS", "TRUSTON", "스팩", "SPAC", "KOSEF", "Fund", "Unit", 
-                "Right", "Rights", "VIX", "국고채", "채권", "혼합", "KBSTAR", "KINDEX", 
-                "ARIRANG", "마이티", "TREX", "특수채", "회사채", "UNICORN", "2차전지양극재", 
-                "IBK K-AI", "액티브", "온디바이스AI", "인덱스", "Acquisition", "Warrant", 
-                "ETF", "Trust", "200"
-            ],
-            
-            # --- 클러스터링 기본 설정 ---
-            'TIME': 'Date',                            # 시간 인덱스명 설정
-            'SCALER': 'standard',                      # 'standard', 'min_max', 'robust', 'no_scaler'
-            'N_CLUSTER_RANGE': [2, 10],                 # KMeans K 범위
-            'METHOD': 'kmeans_softdtw',                # 'kmeans_dtw', 'kmeans_softdtw', 'kmeans_euclidean', 'dbscan_dtw', 'dbscan_softdtw'
-            
-            # --- 클러스터링 알고리즘 파라미터 ---
-            'DBSCAN_EPS': 0.5,                         # 반경
-            'DBSCAN_MIN_SAMPLES': 2,                   # 최소 샘플 수
-            'SOFT_DTW_GAMMA': 1.0,                     # 평활화 정도
-            
-            # --- 전처리 필터링 옵션 ---
-            'MIN_VALID_RATIO': 0.5,                    # 유효값 최소 비율
-            'DROP_CONSTANT': True                      # 상수 컬럼 제거 여부
-        }
-
-        # =========================================================================
-        # 3. 데이터 로드 및 종목 사전 필터링 -> 상위 N개 추출 
-        # =========================================================================
-        print(f"Loading Market Cap Data: {CONFIG['CAP_PATH']}")
-        df_cap = _safe_read_csv(CONFIG['CAP_PATH']) # 에러 우회 함수 적용
-
-        cap_col = CONFIG['CAP_COLUMN']
-        if cap_col not in df_cap.columns:
-            raise ValueError(f"에러: 설정하신 시가총액 컬럼 '{cap_col}'이 df_cap.csv에 존재하지 않습니다.")
-
+    cap_col = CONFIG['CAP_COLUMN']
+    if cap_col not in df_cap.columns:
+        print(f"에러: 설정하신 시가총액 컬럼 '{cap_col}'이 df_cap.csv에 존재하지 않습니다.")
+        df_cap_filtered = df_cap.copy()
+    else:
         # 3-1. 심볼 데이터 준비 (컬럼 또는 인덱스 지원)
         if 'Symbol' in df_cap.columns:
             symbol_series = df_cap['Symbol']
@@ -429,22 +426,23 @@ if __name__ == '__main__':
         df_cap_filtered = df_cap[valid_mask]
 
         # 3-3. 순수 종목들만 남은 상태에서 시가총액 기준 내림차순 정렬 후 상위 TOP_N개 추출
-        df_cap_sorted = df_cap_filtered.sort_values(by=cap_col, ascending=False).head(CONFIG['TOP_N'])
+        df_cap_filtered = df_cap_filtered.sort_values(by=cap_col, ascending=False).head(CONFIG['TOP_N'])
 
-        # 최종 추출된 Symbol 리스트 생성
-        if 'Symbol' in df_cap_sorted.columns:
-            filtered_symbols = df_cap_sorted['Symbol'].tolist()
-        else:
-            filtered_symbols = df_cap_sorted.index.tolist()
+    # 최종 추출된 Symbol 리스트 생성
+    if 'Symbol' in df_cap_filtered.columns:
+        filtered_symbols = df_cap_filtered['Symbol'].tolist()
+    else:
+        filtered_symbols = df_cap_filtered.index.tolist()
 
-        print(f"[필터링 결과] 제외 단어 필터링 후 시가총액 상위 {CONFIG['TOP_N']} 종목 추출 완료 (실제 크기: {len(filtered_symbols)}개)")
+    print(f"[필터링 결과] 제외 단어 필터링 후 시가총액 상위 {CONFIG['TOP_N']} 종목 추출 완료 (실제 크기: {len(filtered_symbols)}개)")
 
-        # =========================================================================
-        # 4. 시계열 데이터 로드 및 최종 종목 적용
-        # =========================================================================
-        print(f"Loading Time-Series Data: {CONFIG['LOAD_PATH']}")
-        source_data_raw = _safe_read_csv(CONFIG['LOAD_PATH']) # 에러 우회 함수 적용
+    # =========================================================================
+    # 4. 시계열 데이터 로드 및 최종 종목 적용
+    # =========================================================================
+    print(f"Loading Time-Series Data: {CONFIG['LOAD_PATH']}")
+    source_data_raw = _safe_read_csv(CONFIG['LOAD_PATH']) # 에러 우회 함수 적용
 
+    if not source_data_raw.empty:
         # 시계열 데이터의 열(Columns) 중에서 최종 추출된 filtered_symbols에 해당하는 것만 교집합으로 남김
         valid_cols = [col for col in source_data_raw.columns if col in filtered_symbols]
         source_data = source_data_raw[valid_cols]

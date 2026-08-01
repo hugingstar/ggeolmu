@@ -604,8 +604,8 @@ class DaskFinanceProcessor:
 if __name__ == "__main__":
     for market in ["KOSPI", "KOSDAQ", "NASDAQ", "NYSE"]: #  
         CONFIG = {
-            "input_path": "C:/Users/yslee/PycharmProjects/FinanceMLOps/Data",
-            "output_path": "C:/Users/yslee/PycharmProjects/FinanceMLOps/Data",
+            "input_path": "Data",
+            "output_path": "Data",
             "market_name": market,
         }
         print(CONFIG["market_name"])
