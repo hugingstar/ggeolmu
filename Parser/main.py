@@ -37,6 +37,9 @@ from get_fdr import get_kospi200_dask_data
 from process_a1 import DaskFinanceProcessor
 
 from process_m1_cap import run_process
+
+# --- DBManager Global Initialization ---
+
 # process_c1의 함수를 이름 충돌 방지를 위해 run_process_c1으로 가져옵니다.
 from process_c1 import get_kospi200_dask_data as run_process_c1 
 from process_c2 import run_cluster
@@ -133,8 +136,6 @@ class FinancePipeline:
             # 1.5단계: 수집된 증분 Raw Data를 PostgreSQL에 UPSERT 적재
             print(f"[*] 1.5단계: {market} 증분 Raw 데이터를 PostgreSQL에 적재 중...")
             try:
-                from db_manager import DBManager
-                db = DBManager()
                 db.initialize_tables()  # 혹시 테이블이 없다면 생성
                 
                 target_insert_df = new_df if new_df is not None and not new_df.empty else merged_df
@@ -244,8 +245,6 @@ class FinancePipeline:
     def _run_clustering(self, market: str, config_c2: dict):
         """내부 메서드: 시가총액 필터링 및 클러스터링 실행 (DB 조회, 실패 시 로컬 파일로 폴백)"""
         print(f"Loading Market Cap Data...")
-        from db_manager import DBManager
-        db = DBManager()
         
         # M1 데이터 (시가총액) 조회
         df_cap = db.read_query("select_market_cap", params=(config_c2['TARGET_DATE'],))
@@ -338,8 +337,6 @@ class FinancePipeline:
         db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Database')
         if db_path not in sys.path:
             sys.path.insert(0, db_path)
-        from db_manager import DBManager
-        db = DBManager()
         a1_path = f"{self.base_path}/{market}/A1Sheet"
         if os.path.exists(a1_path):
             for file in os.listdir(a1_path):
@@ -392,9 +389,7 @@ class FinancePipeline:
 
     def _upsert_b1(self, market, now, start_date_5d):
         print(f"[*] B1Sheet DB 적재 시작: {market}")
-        from db_manager import DBManager
         import os
-        db = DBManager()
         start_dt = now - timedelta(days=5)
         for i in range(6):
             date_str = (start_dt + timedelta(days=i)).strftime('%Y-%m-%d')
@@ -408,9 +403,7 @@ class FinancePipeline:
 
     def _upsert_m1(self, market, target_date):
         print(f"[*] M1Sheet DB 적재 시작: {market}")
-        from db_manager import DBManager
         import os
-        db = DBManager()
         m1_path = f"{self.base_path}/{market}/M1Sheet/{target_date}"
         if os.path.exists(m1_path):
             for file in os.listdir(m1_path):
@@ -422,9 +415,7 @@ class FinancePipeline:
 
     def _upsert_c1(self, market):
         print(f"[*] C1Sheet DB 적재 시작: {market}")
-        from db_manager import DBManager
         import os
-        db = DBManager()
         c1_path = f"{self.base_path}/{market}/C1Sheet"
         if os.path.exists(c1_path):
             for freq in ['1d', '1w', '1m']:
@@ -443,9 +434,7 @@ class FinancePipeline:
 
     def _upsert_c2(self, market, target_date):
         print(f"[*] C2Sheet DB 적재 시작: {market}")
-        from db_manager import DBManager
         import os
-        db = DBManager()
         c2_path = f"{self.base_path}/{market}/C2Sheet/{target_date}"
         if os.path.exists(c2_path):
             for method_dir in os.listdir(c2_path):
@@ -528,3 +517,6 @@ if __name__ == "__main__":
     print("==== 🚀 데이터 즉시 수집 및 파이프라인 가동 ====")
     pipeline.run_kr_markets()
     pipeline.run_us_markets()
+if "db" in locals() and hasattr(db, "conn") and db.conn:
+    db.conn.close()
+    print("[System] DB 연결 종료 완료")
