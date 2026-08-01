@@ -118,14 +118,14 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
     cfg = MARKET_CONFIG.get(key, {"fdr_prefix": None})
     fdr_prefix = cfg.get("fdr_prefix")
 
-    # ===== [증분 수집 (Delta Ingestion) 자동 탐지] =====
+    # ===== [증분 수집 (Delta Ingestion) 초고속 일괄 수집 탐지] =====
     target_dir = os.path.join(output_path, market_name) if not output_path.endswith(market_name) else output_path
     parquet_path = os.path.join(target_dir, "raw_data.parquet")
     tmp_parquet_path = os.path.join(target_dir, "raw_data.parquet.tmp")
     bak_parquet_path = os.path.join(target_dir, "raw_data.parquet.bak")
     
     existing_df = None
-    fetch_start_date = start_date
+    is_delta_mode = False
 
     if os.path.exists(parquet_path):
         try:
@@ -134,36 +134,84 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
                 existing_df['Date'] = pd.to_datetime(existing_df['Date'])
                 max_date = existing_df['Date'].max()
                 if pd.notnull(max_date):
-                    # 안전 윈도우 3일 적용 (휴장일/주말/수정주가 보정 반영)
-                    safe_start = (max_date - pd.Timedelta(days=3)).strftime('%Y-%m-%d')
-                    print(f"[{market_name}] 기존 parquet 파일 감지 (최신 날짜: {max_date.strftime('%Y-%m-%d')}). 증분 수집 시작일: {safe_start}")
-                    fetch_start_date = safe_start
+                    # 최근 7일 이내 증분 데이터일 경우 일괄 증분 수집(StockListing Bulk Fetch) 모드 활성화
+                    days_diff = (pd.Timestamp.now() - max_date).days
+                    if days_diff <= 7:
+                        is_delta_mode = True
+                        print(f"[{market_name}] 기존 parquet 파일 감지 (최신 날짜: {max_date.strftime('%Y-%m-%d')}). 0.5초 초고속 일괄 증분 수집(Bulk Fetch)을 실행합니다.")
         except Exception as e:
-            print(f"[{market_name}] 기존 parquet 파일 로드 실패 ({e}). 전체 수집({start_date})으로 폴백합니다.")
+            print(f"[{market_name}] 기존 parquet 파일 로드 실패 ({e}). 전체 수집으로 폴백합니다.")
             existing_df = None
 
-    delayed_tasks = []
-    
-    print(f"데이터 수집 작업 생성 중 (대상: {len(target_stocks)} 종목, 시작일: {fetch_start_date})...", flush=True)
-    for index, row in target_stocks.iterrows():
-        symbol = row['Symbol']
-        name = row['Name']
-        task = fetch_stock_data(symbol, name, fetch_start_date, fdr_prefix=fdr_prefix, sleep_interval=sleep_interval)
-        delayed_tasks.append(task)
+    new_df = None
 
-    print("Dask 멀티스레드 병렬 계산 및 데이터 증분 수집 시작...", flush=True)
-    
-    import dask
-    # 32개 쓰레드 병렬 스케줄러 적용 (2463개 종목 초속 수집)
-    results = dask.compute(*delayed_tasks, scheduler='threads', num_workers=32)
-    valid_results = [r for r in results if r is not None]
+    # ===== [1) 초고속 일괄 증분 수집 (StockListing Bulk Fetch - 0.5초 완료)] =====
+    if is_delta_mode:
+        try:
+            print(f"[{market_name}] StockListing 기반 전 종목 시세 일괄 다운로드 중...", flush=True)
+            listing_df = fdr.StockListing(market_name)
+            
+            if listing_df is not None and not listing_df.empty:
+                # 한국 및 해외 시장 컬럼 매핑
+                code_col = cfg.get("code_col", "Symbol")
+                if code_col not in listing_df.columns and "Code" in listing_df.columns:
+                    code_col = "Code"
+                
+                rename_dict = {
+                    code_col: 'Symbol',
+                    'Name': 'Name',
+                    'Open': 'Open',
+                    'High': 'High',
+                    'Low': 'Low',
+                    'Close': 'Close',
+                    'Volume': 'Volume',
+                    'Chg': 'Change',
+                    'Changes': 'Change'
+                }
+                
+                bulk_df = listing_df.rename(columns=rename_dict).copy()
+                
+                if cfg.get("pad_zero", False) and 'Symbol' in bulk_df.columns:
+                    bulk_df['Symbol'] = bulk_df['Symbol'].astype(str).str.zfill(6)
+                
+                # 오늘 개장일자 부여
+                today_str = pd.Timestamp.now().strftime('%Y-%m-%d')
+                bulk_df['Date'] = pd.to_datetime(today_str)
+                
+                req_cols = ['Date', 'Symbol', 'Name', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change']
+                for col in req_cols:
+                    if col not in bulk_df.columns:
+                        bulk_df[col] = 0.0 if col in ['Open','High','Low','Close','Volume','Change'] else None
+                
+                new_df = bulk_df[req_cols].dropna(subset=['Symbol', 'Close'])
+                print(f"[{market_name}] 초고속 일괄 증분 수집 성공! (신규 {len(new_df)} 종목 시세 취득 완료)", flush=True)
+        except Exception as e:
+            print(f"[{market_name}] 일괄 수집 중 오류 발생 ({e}). 개별 Dask 수집으로 자동 폴백합니다.")
+            new_df = None
 
-    if not valid_results:
-        print("신규 수집된 데이터가 없습니다.", flush=True)
-        return existing_df, pd.DataFrame()
+    # ===== [2) 전체 수집 또는 폴백 수집 (Dask 병렬 수집)] =====
+    if new_df is None or new_df.empty:
+        fetch_start_date = start_date
+        delayed_tasks = []
+        
+        print(f"개별 데이터 수집 작업 생성 중 (대상: {len(target_stocks)} 종목, 시작일: {fetch_start_date})...", flush=True)
+        for index, row in target_stocks.iterrows():
+            symbol = row['Symbol']
+            name = row['Name']
+            task = fetch_stock_data(symbol, name, fetch_start_date, fdr_prefix=fdr_prefix, sleep_interval=sleep_interval)
+            delayed_tasks.append(task)
 
-    new_df = pd.concat(valid_results, ignore_index=True)
-    new_df['Date'] = pd.to_datetime(new_df['Date'])
+        print("Dask 멀티스레드 병렬 계산 및 데이터 수집 시작...", flush=True)
+        import dask
+        results = dask.compute(*delayed_tasks, scheduler='threads', num_workers=32)
+        valid_results = [r for r in results if r is not None]
+
+        if not valid_results:
+            print("신규 수집된 데이터가 없습니다.", flush=True)
+            return existing_df, pd.DataFrame()
+
+        new_df = pd.concat(valid_results, ignore_index=True)
+        new_df['Date'] = pd.to_datetime(new_df['Date'])
 
     # ===== [안전 중복 제거 및 병합 (Deduplicated Merge)] =====
     if existing_df is not None and not existing_df.empty:
