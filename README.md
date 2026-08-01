@@ -13,49 +13,61 @@ Dask 분산 컴퓨팅 및 **안정성 강화 증분 수집(Delta Ingestion)** �
 
 ```mermaid
 flowchart TD
+    %% 커스텀 색상 및 폰트 크기 스타일 정의
+    classDef pythonEngine fill:#1e3a8a,stroke:#60a5fa,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
+    classDef dbStorage fill:#064e3b,stroke:#34d399,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
+    classDef agentManager fill:#831843,stroke:#f472b6,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
+    classDef webServer fill:#1e293b,stroke:#94a3b8,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
+
     %% 1단계: 증분 수집 및 원자적 적재
     subgraph Step1 ["1단계: 증분 데이터 수집 (Delta Ingestion)"]
         direction TB
-        FDR["FinanceDataReader API"] -->|3일 Overlap 수집| GetFDR["get_fdr.py"]
-        GetFDR -->|원자적 저장 .tmp & .bak| RawParquet[/"raw_data.parquet"/]
-        GetFDR -->|증분 델타 UPSERT| DB_Raw[("PostgreSQL: raw_stock_data")]
+        FDR[/"🌐 FinanceDataReader API"/] -->|3일 Overlap 수집| GetFDR["🐍 get_fdr.py"]
+        GetFDR -->|원자적 저장 .tmp & .bak| RawParquet[/"📦 raw_data.parquet"/]
+        GetFDR -->|증분 델타 UPSERT| DB_Raw[("💾 DB: raw_stock_data")]
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
     subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dask Engine)"]
         direction TB
-        DB_Raw -->|시세 데이터 로드| ProcessA1["process_a1.py (MA, RSI, MACD)"]
-        ProcessA1 -->|지표 저장| DB_Tech[("PostgreSQL: technical_indicators")]
-        ProcessA1 -->|지표 릴레이| ProcessB3["process_b3.py (시그널 분석)"]
-        ProcessB3 -->|시그널 저장| DB_Signal[("PostgreSQL: trading_signals")]
+        DB_Raw -->|시세 데이터 로드| ProcessA1["🐍 process_a1.py (MA, RSI, MACD)"]
+        ProcessA1 -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
+        ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py (시그널 분석)"]
+        ProcessB3 -->|시그널 저장| DB_Signal[("💾 DB: trading_signals")]
     end
 
-    %% 3단계: 시게열 클러스터링
+    %% 3단계: 시계열 클러스터링
     subgraph Step3 ["3단계: 시가총액 & 시계열 클러스터링"]
         direction TB
-        DB_Raw -->|시세 로드| ProcessM1["process_m1_cap.py"]
-        ProcessM1 -->|시총 저장| DB_Cap[("PostgreSQL: market_cap")]
-        ProcessM1 -->|정규화| ProcessC1["process_c1.py (Z-Score)"]
-        ProcessC1 -->|Z-Score 저장| DB_ZScore[("PostgreSQL: zscore_features")]
-        ProcessC1 -->|SoftDTW 군집화| ProcessC2["process_c2.py (K-Means)"]
-        ProcessC2 -->|군집 저장| DB_Cluster[("PostgreSQL: clustering_results")]
+        DB_Raw -->|시세 로드| ProcessM1["🐍 process_m1_cap.py"]
+        ProcessM1 -->|시총 저장| DB_Cap[("💾 DB: market_cap")]
+        ProcessM1 -->|정규화| ProcessC1["🐍 process_c1.py (Z-Score)"]
+        ProcessC1 -->|Z-Score 저장| DB_ZScore[("💾 DB: zscore_features")]
+        ProcessC1 -->|SoftDTW 군집화| ProcessC2["🐍 process_c2.py (K-Means)"]
+        ProcessC2 -->|군집 저장| DB_Cluster[("💾 DB: clustering_results")]
     end
 
     %% 4단계: 4-Tier 웹 서비스 & 멀티 에이전트
     subgraph Step4 ["4단계: 4-Tier 웹 서비스 & Multi-Agent"]
         direction TB
-        UI[/"WEB: Vanilla JS SPA UI"/] <-->|REST API| WAS["WAS: FastAPI Server"]
-        WAS <--> Audit["Manager: AuditAgent (검증/보안)"]
-        WAS <--> PromptAgent["Manager: PromptMakerAgent (퀀트분석)"]
+        UI[/"🖥️ WEB: Vanilla JS SPA UI"/] <-->|REST API| WAS["⚙️ WAS: FastAPI Server"]
+        WAS <--> Audit["🤖 Manager: AuditAgent (검증/보안)"]
+        WAS <--> PromptAgent["🤖 Manager: PromptMakerAgent (퀀트분석)"]
         PromptAgent -->|5일 시세/지표 조회| DB_Raw
-        WAS -->|프롬프트 기록| DB_Logs[("PostgreSQL: prompt_logs")]
-        SecAgent["Manager: WebSecurityAgent"] -.- WAS
+        WAS -->|프롬프트 기록| DB_Logs[("💾 DB: prompt_logs")]
+        SecAgent["🤖 Manager: WebSecurityAgent"] -.- WAS
     end
 
     %% 파이프라인 모듈 간 메인 연계선
     Step1 ==>|Raw 시세 공급| Step2
     Step1 ==>|기초 데이터 공급| Step3
     Step2 & Step3 ==>|분석 지표 공급| Step4
+
+    %% 노드 스타일 지정 (.py: 파란색, DB: 녹색, 에이전트: 핑크, Web/WAS: 슬레이트)
+    class GetFDR,ProcessA1,ProcessB3,ProcessM1,ProcessC1,ProcessC2 pythonEngine;
+    class DB_Raw,DB_Tech,DB_Signal,DB_Cap,DB_ZScore,DB_Cluster,DB_Logs,RawParquet dbStorage;
+    class Audit,PromptAgent,SecAgent agentManager;
+    class UI,WAS,FDR webServer;
 ```
 
 ---
