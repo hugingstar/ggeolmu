@@ -8,10 +8,10 @@ from datetime import datetime
 # 클러스터 / 파티션 설정
 # ======================================================================
 CLUSTER_CONFIG = {
-    "n_workers": 16,
-    "threads_per_worker": 1,
-    "memory_limit": "48GB",
-    "npartitions": 64,
+    "n_workers": 4,
+    "threads_per_worker": 2,
+    "memory_limit": "3GB",
+    "npartitions": 16,
     "use_persist": False,
 }
 

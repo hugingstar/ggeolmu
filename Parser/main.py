@@ -1,8 +1,22 @@
 import os
 import sys
 import json
+import resource
 from datetime import datetime, timedelta
 import pytz
+
+def increase_file_descriptor_limit():
+    """macOS [Errno 24] Too many open files 에러 방지를 위해 파일 디스크립터 한도를 안전하게 최대치로 상향"""
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        target_limit = min(hard, 65536) if hard > 0 else 8192
+        if soft < target_limit:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (target_limit, hard))
+            print(f"[System] macOS 파일 디스크립터 한도 상향 완료: {soft} -> {target_limit}")
+    except Exception as e:
+        print(f"[System] 파일 디스크립터 한도 설정 경고: {e}")
+
+increase_file_descriptor_limit()
 
 # 4-Tier 디렉토리 독립 구조를 위한 sys.path 등록
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

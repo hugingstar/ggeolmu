@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore")
+
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler
 from sklearn.cluster import DBSCAN
 from tslearn.clustering import TimeSeriesKMeans

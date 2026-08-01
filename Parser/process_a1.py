@@ -17,10 +17,10 @@ from datetime import datetime
 # 환경에 맞춰 아래 값만 조정하세요.
 # ======================================================================
 CLUSTER_CONFIG = {
-    "n_workers": 16,
-    "threads_per_worker": 1,
-    "memory_limit": "48GB",
-    "npartitions": 64,
+    "n_workers": 4,
+    "threads_per_worker": 2,
+    "memory_limit": "3GB",
+    "npartitions": 16,
     "use_persist": False,
 }
 
