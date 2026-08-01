@@ -109,7 +109,20 @@ def fetch_stock_data(symbol, name, start_date, fdr_prefix=None, sleep_interval=0
                 print(f"실패 (스킵됨): {name} ({symbol}) - {e}", flush=True)
                 return None
 
-def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sleep_interval=0.005):
+def get_db_max_date():
+    """PostgreSQL public.raw_stock_data 테이블에서 최신 수집 일자를 안전하게 조회"""
+    try:
+        from db_manager import DBManager
+        db = DBManager()
+        if db.conn:
+            rows = db.read_query_direct("SELECT MAX(date) FROM public.raw_stock_data;")
+            if rows and rows[0] and rows[0][0]:
+                return pd.to_datetime(rows[0][0])
+    except Exception:
+        pass
+    return None
+
+def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sleep_interval=0.005, save_parquet=False):
     print("종목 리스트를 불러오는 중...", flush=True)
     stocks = load_stock_list_from_csv(market_name)
     target_stocks = stocks.head(num_stocks)
@@ -118,8 +131,11 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
     cfg = MARKET_CONFIG.get(key, {"fdr_prefix": None})
     fdr_prefix = cfg.get("fdr_prefix")
 
-    # ===== [증분 수집 (Delta Ingestion) 초고속 일괄 수집 탐지] =====
+    # ===== [경로 정속화: Data/{MARKET}] =====
     target_dir = os.path.join(output_path, market_name) if not output_path.endswith(market_name) else output_path
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+
     parquet_path = os.path.join(target_dir, "raw_data.parquet")
     tmp_parquet_path = os.path.join(target_dir, "raw_data.parquet.tmp")
     bak_parquet_path = os.path.join(target_dir, "raw_data.parquet.bak")
@@ -127,21 +143,24 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
     existing_df = None
     is_delta_mode = False
 
-    if os.path.exists(parquet_path):
+    # 1. DB 최신 날짜 우선 탐지 (Parquet 파일 의존성 제거)
+    max_date = get_db_max_date()
+    
+    # 2. DB에 기록이 없으면 로컬 Parquet 확인
+    if max_date is None and os.path.exists(parquet_path):
         try:
             existing_df = pd.read_parquet(parquet_path)
             if not existing_df.empty and 'Date' in existing_df.columns:
                 existing_df['Date'] = pd.to_datetime(existing_df['Date'])
                 max_date = existing_df['Date'].max()
-                if pd.notnull(max_date):
-                    # 최근 7일 이내 증분 데이터일 경우 일괄 증분 수집(StockListing Bulk Fetch) 모드 활성화
-                    days_diff = (pd.Timestamp.now() - max_date).days
-                    if days_diff <= 7:
-                        is_delta_mode = True
-                        print(f"[{market_name}] 기존 parquet 파일 감지 (최신 날짜: {max_date.strftime('%Y-%m-%d')}). 0.5초 초고속 일괄 증분 수집(Bulk Fetch)을 실행합니다.")
         except Exception as e:
-            print(f"[{market_name}] 기존 parquet 파일 로드 실패 ({e}). 전체 수집으로 폴백합니다.")
             existing_df = None
+
+    if max_date is not None and pd.notnull(max_date):
+        days_diff = (pd.Timestamp.now() - max_date).days
+        if days_diff <= 14:
+            is_delta_mode = True
+            print(f"[{market_name}] DB/스토리지 최신 날짜 감지 ({max_date.strftime('%Y-%m-%d')}). 0.5초 초고속 일괄 증분 수집(Bulk Fetch)을 실행합니다.")
 
     new_df = None
 
@@ -152,7 +171,6 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
             listing_df = fdr.StockListing(market_name)
             
             if listing_df is not None and not listing_df.empty:
-                # 한국 및 해외 시장 컬럼 매핑
                 code_col = cfg.get("code_col", "Symbol")
                 if code_col not in listing_df.columns and "Code" in listing_df.columns:
                     code_col = "Code"
@@ -174,7 +192,6 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
                 if cfg.get("pad_zero", False) and 'Symbol' in bulk_df.columns:
                     bulk_df['Symbol'] = bulk_df['Symbol'].astype(str).str.zfill(6)
                 
-                # 오늘 개장일자 부여
                 today_str = pd.Timestamp.now().strftime('%Y-%m-%d')
                 bulk_df['Date'] = pd.to_datetime(today_str)
                 
@@ -208,58 +225,41 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
 
         if not valid_results:
             print("신규 수집된 데이터가 없습니다.", flush=True)
-            return existing_df, pd.DataFrame()
+            return None, pd.DataFrame()
 
         new_df = pd.concat(valid_results, ignore_index=True)
         new_df['Date'] = pd.to_datetime(new_df['Date'])
 
-    # ===== [안전 중복 제거 및 병합 (Deduplicated Merge)] =====
-    if existing_df is not None and not existing_df.empty:
-        merged_df = pd.concat([existing_df, new_df], ignore_index=True)
-    else:
-        merged_df = new_df
+    # Parquet 파일 생성이 명시적으로 요청된 경우에만 저장 (기본값 False: DB 직행 적재)
+    if save_parquet:
+        if existing_df is not None and not existing_df.empty:
+            merged_df = pd.concat([existing_df, new_df], ignore_index=True)
+        else:
+            merged_df = new_df
 
-    merged_df['Date_str'] = merged_df['Date'].dt.strftime('%Y-%m-%d')
-    # 동일 날짜 및 동일 종목에 대해 나중에 수집된 신규 데이터로 안전하게 덮어쓰기 (keep='last')
-    merged_df = merged_df.drop_duplicates(subset=['Date_str', 'Symbol'], keep='last')
-    merged_df = merged_df.drop(columns=['Date_str'])
-    merged_df = merged_df.sort_values(by=['Symbol', 'Date']).reset_index(drop=True)
+        merged_df['Date_str'] = merged_df['Date'].dt.strftime('%Y-%m-%d')
+        merged_df = merged_df.drop_duplicates(subset=['Date_str', 'Symbol'], keep='last')
+        merged_df = merged_df.drop(columns=['Date_str'])
+        merged_df = merged_df.sort_values(by=['Symbol', 'Date']).reset_index(drop=True)
 
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir, exist_ok=True)
+        save_df = merged_df.copy()
+        save_df['Date'] = save_df['Date'].dt.strftime('%Y-%m-%d')
 
-    save_df = merged_df.copy()
-    save_df['Date'] = save_df['Date'].dt.strftime('%Y-%m-%d')
-
-    # ===== [원자적 파일 교체 (Atomic Write Pattern)] =====
-    try:
-        # 1. 임시 파일에 쓰기
-        save_df.to_parquet(tmp_parquet_path, index=False, engine='pyarrow')
-        
-        # 2. 기존 원본이 있다면 백업 생성
-        if os.path.exists(parquet_path):
+        try:
+            save_df.to_parquet(tmp_parquet_path, index=False, engine='pyarrow')
+            if os.path.exists(parquet_path):
+                if os.path.exists(bak_parquet_path):
+                    os.remove(bak_parquet_path)
+                os.rename(parquet_path, bak_parquet_path)
+            os.replace(tmp_parquet_path, parquet_path)
             if os.path.exists(bak_parquet_path):
                 os.remove(bak_parquet_path)
-            os.rename(parquet_path, bak_parquet_path)
+            print(f"[{market_name}] raw_data.parquet 원자적 저장 완료! (총 {len(save_df)} 행)", flush=True)
+        except Exception as e:
+            print(f"[{market_name}] Parquet 저장 중 오류 발생: {e}")
+        return save_df, new_df
 
-        # 3. 임시 파일을 최종 타겟 파일로 원자적 교체
-        os.replace(tmp_parquet_path, parquet_path)
-        
-        # 4. 쓰기 성공 시 백업 제거
-        if os.path.exists(bak_parquet_path):
-            os.remove(bak_parquet_path)
-            
-        print(f"[{market_name}] raw_data.parquet 원자적 쓰기 완료! (총 {len(save_df)} 행, 증분 {len(new_df)} 건)", flush=True)
-    except Exception as e:
-        print(f"[{market_name}] Parquet 저장 중 오류 발생: {e}")
-        # 오류 발생 시 임시 파일 정리 및 백업 복구
-        if os.path.exists(tmp_parquet_path):
-            os.remove(tmp_parquet_path)
-        if os.path.exists(bak_parquet_path) and not os.path.exists(parquet_path):
-            os.rename(bak_parquet_path, parquet_path)
-        raise e
-
-    return save_df, new_df
+    return None, new_df
 
 # 메인 실행부
 if __name__ == "__main__":

@@ -97,7 +97,7 @@ class FinancePipeline:
         merged_df, new_df = get_kospi200_dask_data(
             start_date="2000-01-01",
             num_stocks=4000,
-            output_path=os.path.join(self.base_path, market),
+            output_path=self.base_path,
             sleep_interval=0.05,
             market_name=market
         )
