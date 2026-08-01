@@ -1,60 +1,11 @@
-import dask.dataframe as dd
 import pandas as pd
 import os
-from dask.distributed import Client
 from datetime import datetime
 
-# ======================================================================
-import psutil
-import dask
-
-def get_dynamic_cluster_config():
+class PandasProcessor:
     """
-    현재 시스템의 RAM과 CPU 코어 수를 감지하여
-    Dask 메모리 초과/워커 킬 현상을 방지하는 동적 클러스터 설정 반환
-    """
-    total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
-    cpu_cores = os.cpu_count() or 4
-    
-    if total_ram_gb <= 20:
-        n_workers = 2
-        threads_per_worker = max(2, cpu_cores // 2)
-        memory_limit = f"{int(total_ram_gb * 0.4)}GB"
-        npartitions = 8
-    elif total_ram_gb <= 40:
-        n_workers = 4
-        threads_per_worker = 2
-        memory_limit = "6GB"
-        npartitions = 16
-    else:
-        n_workers = 8
-        threads_per_worker = 2
-        memory_limit = "8GB"
-        npartitions = 32
-
-    # Dask Nanny 메모리 하드 킬 방지
-    dask.config.set({
-        "distributed.worker.memory.target": 0.70,
-        "distributed.worker.memory.spill": 0.85,
-        "distributed.worker.memory.pause": 0.90,
-        "distributed.worker.memory.terminate": False
-    })
-
-    return {
-        "n_workers": n_workers,
-        "threads_per_worker": threads_per_worker,
-        "memory_limit": memory_limit,
-        "npartitions": npartitions,
-        "use_persist": False,
-    }
-
-# 시스템 동적 맞춤 클러스터 설정
-CLUSTER_CONFIG = get_dynamic_cluster_config()
-
-class DaskProcessor:
-    """
-    KOSPI 데이터를 Dask를 사용하여 처리하고 일/주/월 단위로 피벗하며,
-    종목별 Z-Score 및 통계치(평균, 표준편차)를 산출하는 클래스
+    KOSPI 데이터를 Pandas를 사용하여 처리하고 일/주/월 단위로 피벗하며,
+    종목별 Z-Score 및 통계치(평균, 표준편차)를 산출하는 클래스 (Dask에서 전환됨)
     """
     def __init__(self, start_date, end_date, num_stocks, input_path, output_path, sleep_interval, market_name, exclude_keywords=None):
         self.start_date = start_date
@@ -68,7 +19,6 @@ class DaskProcessor:
 
         # Parquet 지정
         self.input_file = "raw_data.parquet"
-
         self.save_dir = os.path.join(self.output_path, self.market_name, "C1Sheet")
 
     def process_data(self, freq='1d'):
@@ -78,7 +28,7 @@ class DaskProcessor:
         # 1. 출력 디렉토리 생성
         os.makedirs(self.save_dir, exist_ok=True)
 
-        # 2. Dask 데이터프레임으로 Parquet 읽기
+        # 2. Pandas 데이터프레임으로 Parquet 읽기
         input_full_path = os.path.join(self.input_path, self.market_name, self.input_file)
         if not os.path.exists(input_full_path):
             input_full_path = os.path.join(self.input_path, self.market_name, "raw_data.csv")
@@ -89,53 +39,44 @@ class DaskProcessor:
 
         # Parquet / CSV 엔진으로 읽기
         if input_full_path.endswith('.parquet'):
-            ddf = dd.read_parquet(input_full_path)
+            df = pd.read_parquet(input_full_path)
         else:
-            ddf = dd.read_csv(input_full_path)
+            df = pd.read_csv(input_full_path)
 
         # === [추가 기능: 불필요한 단어 필터링] 데이터를 부르고 바로 적용 ===
         if self.exclude_keywords:
             pattern = '|'.join(self.exclude_keywords)
             # Name 컬럼에 필터링 단어가 포함되지 않은(~ 표시) 데이터만 남김
-            ddf = ddf[~ddf['Symbol'].str.contains(pattern, case=False, na=False, regex=True)]
+            df = df[~df['Symbol'].str.contains(pattern, case=False, na=False, regex=True)]
         # =====================================================================
 
-        # === [분산 처리 설정 적용] 파티션 수 조정 및 persist ===
-        if CLUSTER_CONFIG.get("npartitions"):
-            ddf = ddf.repartition(npartitions=CLUSTER_CONFIG["npartitions"])
-        
-        if CLUSTER_CONFIG.get("use_persist"):
-            ddf = ddf.persist()
-        # =======================================================
-
         # 3. 날짜 필터링 및 타입 변환
-        ddf['Date'] = dd.to_datetime(ddf['Date'])
-        ddf = ddf[ddf['Date'] >= self.start_date]
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df[df['Date'] >= pd.to_datetime(self.start_date)]
 
         # 4. 종목 필터링
-        # CSV 데이터 내 'Name' 컬럼에서 고유(unique) 값 추출
-        all_names = ddf['Symbol'].unique().compute().tolist()
-        print(f"[정보] CSV 파일에서 {self.market_name} {len(all_names)}개의 고유 종목을 확인했습니다.")
+        # 고유(unique) 값 추출
+        all_names = df['Symbol'].unique().tolist()
+        print(f"[정보] 데이터에서 {self.market_name} {len(all_names)}개의 고유 종목을 확인했습니다.")
 
         # 설정된 num_stocks 개수만큼만 처리 (기존 fallback 제한 로직 유지)
         selected_names = all_names[:self.num_stocks]
         print(f"[정보] 최종 처리 대상 종목 수: {len(selected_names)} (최대 {self.num_stocks}개 제한)")
 
-        ddf = ddf[ddf['Symbol'].isin(selected_names)]
+        df = df[df['Symbol'].isin(selected_names)]
 
         # 5. 데이터 피벗 (X축: Name, Y축: Date)
-        ddf['Symbol'] = ddf['Symbol'].astype('category').cat.set_categories(selected_names)
-        pivoted_ddf = ddf.pivot_table(index='Date', columns='Symbol', values='Close')
-
-        # 6. Dask 연산 수행 (Pandas DataFrame으로 변환)
-        final_df = pivoted_ddf.compute()
+        df['Symbol'] = df['Symbol'].astype('category').cat.set_categories(selected_names)
+        pivoted_df = df.pivot_table(index='Date', columns='Symbol', values='Close', observed=False)
 
         # 7. 리샘플링 (주봉/월봉 처리)
         freq_map = {'1d': 'D', '1w': 'W-FRI', '1m': 'ME'}
         target_freq = freq_map.get(freq.lower(), 'D')
 
         if target_freq != 'D':
-            final_df = final_df.resample(target_freq).last()
+            final_df = pivoted_df.resample(target_freq).last()
+        else:
+            final_df = pivoted_df.copy()
 
         # --- [추가 기능: Z-Score 및 통계치 계산] ---
 
@@ -151,10 +92,6 @@ class DaskProcessor:
         # 9. Z-Score 계산 및 Transpose 추가
         # 기본 계산 결과: Index=Date(시계열), Columns=Name(종목)
         zscore_df = (final_df - mean_series) / std_series
-
-        # 요청사항: Transpose 과정 추가 (필요에 따라 축을 전환)
-        # 기본 상태 유지
-        zscore_df = zscore_df
 
         # 10. 파일 저장 (CSV 로만 저장)
         # (1) 기본 피벗 데이터 (가격)
@@ -185,9 +122,9 @@ class DaskProcessor:
 
 def get_kospi200_dask_data(start_date, end_date, num_stocks, input_path, output_path, sleep_interval, market_name, frequencies=['1d'], exclude_keywords=None):
     """
-    설정된 모든 주기에 대해 데이터를 처리하는 함수
+    설정된 모든 주기에 대해 데이터를 처리하는 함수 (인터페이스 유지를 위해 함수명 유지)
     """
-    processor = DaskProcessor(
+    processor = PandasProcessor(
         start_date=start_date,
         end_date=end_date,
         num_stocks=num_stocks,
@@ -200,25 +137,12 @@ def get_kospi200_dask_data(start_date, end_date, num_stocks, input_path, output_
 
     results = {}
     
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Dask 분산 시스템 가동... "
-          f"(workers={CLUSTER_CONFIG['n_workers']}, "
-          f"mem={CLUSTER_CONFIG['memory_limit']}, "
-          f"npartitions={CLUSTER_CONFIG['npartitions']}, "
-          f"persist={CLUSTER_CONFIG['use_persist']})")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Pandas 인메모리 시스템 가동... ")
 
-    # === [분산 처리 설정 적용] Client 활성화 ===
     try:
-        with Client(
-            n_workers=CLUSTER_CONFIG["n_workers"],
-            threads_per_worker=CLUSTER_CONFIG["threads_per_worker"],
-            memory_limit=CLUSTER_CONFIG["memory_limit"],
-        ) as client:
-            print(f"대시보드: {client.dashboard_link}")
-            
-            for f in frequencies:
-                results[f] = processor.process_data(freq=f)
-            return results
-            
+        for f in frequencies:
+            results[f] = processor.process_data(freq=f)
+        return results
     except Exception as e:
         print(f"데이터 처리 중 오류 발생: {e}")
         import traceback
