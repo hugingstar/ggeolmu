@@ -74,76 +74,66 @@ flowchart TD
 
 ### 2.2 개체 관계도 (ER Diagram)
 
-PostgreSQL 데이터베이스 7개 핵심 테이블 간의 논리적 키(Date, Symbol) 연관 관계입니다.
+PostgreSQL 데이터베이스 7개 핵심 테이블 간의 키(PK/UK) 구조와 연관 관계입니다.
 
 ```mermaid
 erDiagram
     RAW_STOCK_DATA {
-        int id PK "식별자"
-        date date "수집일 (UK)"
-        varchar symbol "종목코드 (UK)"
-        varchar name "종목명"
-        numeric open "시가"
-        numeric high "고가"
-        numeric low "저가"
-        numeric close "종가"
-        numeric volume "거래량"
-        numeric change "등락률"
+        int id PK
+        date date UK
+        varchar symbol UK
+        varchar name
+        numeric close
+        numeric volume
     }
 
     MARKET_CAP {
-        date date PK "기준일"
-        varchar symbol PK "종목코드"
-        numeric market_cap_krw "시가총액"
+        date date PK
+        varchar symbol PK
+        numeric market_cap_krw
     }
 
     TECHNICAL_INDICATORS {
-        date date PK "수집일"
-        varchar symbol PK "종목코드"
-        numeric ma5 "5일 이평"
-        numeric ma20 "20일 이평"
-        numeric ma60 "60일 이평"
-        numeric rsi "RSI"
-        numeric macd "MACD"
-        numeric adx "ADX"
+        date date PK
+        varchar symbol PK
+        numeric rsi
+        numeric macd
     }
 
     TRADING_SIGNALS {
-        date date PK "수집일"
-        varchar symbol PK "종목코드"
-        varchar signal_type PK "시그널 유형"
-        numeric signal_strength "시그널 강도"
-        text description "상세 설명"
+        date date PK
+        varchar symbol PK
+        varchar signal_type PK
+        numeric signal_strength
     }
 
     ZSCORE_FEATURES {
-        date date PK "기준일"
-        varchar symbol PK "종목코드"
-        varchar freq PK "주기(1d/1w/1m)"
-        numeric zscore "Z-Score"
+        date date PK
+        varchar symbol PK
+        varchar freq PK
+        numeric zscore
     }
 
     CLUSTERING_RESULTS {
-        date target_date PK "기준일"
-        varchar symbol PK "종목코드"
-        varchar method PK "군집기법"
-        int cluster_id "군집 번호"
+        date target_date PK
+        varchar symbol PK
+        varchar method PK
+        int cluster_id
     }
 
     PROMPT_LOGS {
-        int id PK "식별자"
-        varchar symbol "종목코드"
-        text generated_prompt "생성 프롬프트"
-        varchar status "Audit 상태"
+        int id PK
+        varchar symbol
+        varchar status
     }
 
-    %% 수직/수평 방사형 관계 배치
-    RAW_STOCK_DATA ||--|| MARKET_CAP : "시가총액 매핑"
-    RAW_STOCK_DATA ||--o{ TECHNICAL_INDICATORS : "보조지표 산출"
-    RAW_STOCK_DATA ||--o{ TRADING_SIGNALS : "시그널 추출"
-    RAW_STOCK_DATA ||--o{ ZSCORE_FEATURES : "Z-Score 정규화"
-    RAW_STOCK_DATA ||--o{ CLUSTERING_RESULTS : "패턴 군집화"
-    RAW_STOCK_DATA ||--o{ PROMPT_LOGS : "에이전트 분석 기록"
+    %% 키 기준 방사형 연결 관계
+    RAW_STOCK_DATA ||--|| MARKET_CAP : "일별 시총"
+    RAW_STOCK_DATA ||--o{ TECHNICAL_INDICATORS : "보조 지표"
+    RAW_STOCK_DATA ||--o{ TRADING_SIGNALS : "분석 시그널"
+    RAW_STOCK_DATA ||--o{ ZSCORE_FEATURES : "Z-Score"
+    RAW_STOCK_DATA ||--o{ CLUSTERING_RESULTS : "패턴 군집"
+    RAW_STOCK_DATA ||--o{ PROMPT_LOGS : "에이전트 기록"
 ```
 
 ---
