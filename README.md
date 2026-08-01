@@ -3,7 +3,7 @@
 ## 1. 개요
 `Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집·가공하여 **PostgreSQL 데이터베이스에 적재**하고, 이를 멀티 에이전트(Multi-Agent) 기반으로 분석하여 시각화하는 **4-Tier (WEB-WAS-DB-Manager) 주식 분석 웹 서비스**입니다.
 
-Dask 분산 컴퓨팅 및 **안정성 강화 증분 수집(Delta Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
+macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`) 및 **`fdr.StockListing` 기반 0.5초 초고속 일괄 증분 수집(Bulk Fetch)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
 
 ---
 
@@ -20,17 +20,17 @@ flowchart TD
     classDef webServer fill:#1e293b,stroke:#94a3b8,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
 
     %% 1단계: 증분 수집 및 원자적 적재
-    subgraph Step1 ["1단계: 증분 데이터 수집 (Delta Ingestion)"]
+    subgraph Step1 ["1단계: 0.5초 일괄 증분 수집 (StockListing Bulk Fetch)"]
         direction TB
-        FDR[/"🌐 FinanceDataReader API"/] -->|3일 Overlap 수집| GetFDR["🐍 get_fdr.py<br>(3일 Safety Overlap 수집)"]
+        FDR[/"🌐 FinanceDataReader API"/] -->|0.5초 일괄 증분 수집| GetFDR["🐍 get_fdr.py<br>(StockListing Bulk Fetch)"]
         GetFDR -->|원자적 저장 .tmp & .bak| RawParquet[/"📦 raw_data.parquet"/]
         GetFDR -->|증분 델타 적재| DB_Raw[("💾 DB: raw_stock_data")]
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
-    subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dask Engine)"]
+    subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dask 16GB RAM 튜닝)"]
         direction TB
-        ProcessA1["🐍 process_a1.py<br>(MA5~200, RSI, MACD 연산)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
+        ProcessA1["🐍 process_a1.py<br>(MA, RSI, MACD / 4 Workers)"] -->|지표 저장| DB_Tech[("💾 DB: technical_indicators")]
         ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py<br>(상승/하락/다이버전스 시그널)"]
         ProcessB3 -->|시그널 저장| DB_Signal[("💾 DB: trading_signals")]
     end
