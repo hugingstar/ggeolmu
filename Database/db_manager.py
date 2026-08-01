@@ -296,56 +296,191 @@ class DBManager:
     def upsert_technical_indicators(self, df: pd.DataFrame):
         if not self.conn or df.empty:
             return
-        df_clean = df.where(pd.notnull(df), None)
         records = []
+        col_mappings = [
+            ('ma1', 'MA1', 'ma1'),
+            ('ma2', 'MA2', 'ma2'),
+            ('ma3', 'MA3', 'ma3'),
+            ('ma4', 'MA4', 'ma4'),
+            ('ma5', 'MA5', 'ma5'),
+            ('ma6', 'MA6', 'ma6'),
+            ('ma7', 'MA7', 'ma7'),
+            ('ma8', 'MA8', 'ma8'),
+            ('ma9', 'MA9', 'ma9'),
+            ('ma20', 'MA20', 'ma20'),
+            ('ma50', 'MA50', 'ma50'),
+            ('ma60', 'MA60', 'ma60'),
+            ('ma90', 'MA90', 'ma90'),
+            ('ma120', 'MA120', 'ma120'),
+            ('ma200', 'MA200', 'ma200'),
+            ('ma224', 'MA224', 'ma224'),
+            ('close_diff_first', 'Close_diff_first', 'close_diff_first'),
+            ('close_rate_first', 'Close_rate_first', 'close_rate_first'),
+            ('currencyvolume', 'CurrencyVolume', 'currencyvolume'),
+            ('currencyvolume_ratio_ma20', 'CurrencyVolume_Ratio_MA20', 'currencyvolume_ratio_ma20'),
+            ('obv', 'OBV', 'obv'),
+            ('mobv', 'MOBV', 'mobv'),
+            ('deltamobv', 'DeltaMOBV', 'deltamobv'),
+            ('rsi', 'RSI', 'rsi'),
+            ('rsi_signal', 'RSI_Signal', 'rsi_signal'),
+            ('rsi_bulldiv', 'RSI_BullDiv', 'rsi_bulldiv'),
+            ('rsi_beardiv', 'RSI_BearDiv', 'rsi_beardiv'),
+            ('rsi_hidden_bulldiv', 'RSI_Hidden_BullDiv', 'rsi_hidden_bulldiv'),
+            ('rsi_hidden_beardiv', 'RSI_Hidden_BearDiv', 'rsi_hidden_beardiv'),
+            ('rsi_uptrend', 'RSI_UpTrend', 'rsi_uptrend'),
+            ('rsi_downtrend', 'RSI_DownTrend', 'rsi_downtrend'),
+            ('rsi2', 'RSI2', 'rsi2'),
+            ('rsi_signal2', 'RSI_Signal2', 'rsi_signal2'),
+            ('rsi_bulldiv2', 'RSI_BullDiv2', 'rsi_bulldiv2'),
+            ('rsi_beardiv2', 'RSI_BearDiv2', 'rsi_beardiv2'),
+            ('rsi_hidden_bulldiv2', 'RSI_Hidden_BullDiv2', 'rsi_hidden_bulldiv2'),
+            ('rsi_hidden_beardiv2', 'RSI_Hidden_BearDiv2', 'rsi_hidden_beardiv2'),
+            ('rsi_uptrend2', 'RSI_UpTrend2', 'rsi_uptrend2'),
+            ('rsi_downtrend2', 'RSI_DownTrend2', 'rsi_downtrend2'),
+            ('rsi3', 'RSI3', 'rsi3'),
+            ('rsi_signal3', 'RSI_Signal3', 'rsi_signal3'),
+            ('rsi_bulldiv3', 'RSI_BullDiv3', 'rsi_bulldiv3'),
+            ('rsi_beardiv3', 'RSI_BearDiv3', 'rsi_beardiv3'),
+            ('rsi_hidden_bulldiv3', 'RSI_Hidden_BullDiv3', 'rsi_hidden_bulldiv3'),
+            ('rsi_hidden_beardiv3', 'RSI_Hidden_BearDiv3', 'rsi_hidden_beardiv3'),
+            ('rsi_uptrend3', 'RSI_UpTrend3', 'rsi_uptrend3'),
+            ('rsi_downtrend3', 'RSI_DownTrend3', 'rsi_downtrend3'),
+            ('rsi4', 'RSI4', 'rsi4'),
+            ('rsi_signal4', 'RSI_Signal4', 'rsi_signal4'),
+            ('rsi_bulldiv4', 'RSI_BullDiv4', 'rsi_bulldiv4'),
+            ('rsi_beardiv4', 'RSI_BearDiv4', 'rsi_beardiv4'),
+            ('rsi_hidden_bulldiv4', 'RSI_Hidden_BullDiv4', 'rsi_hidden_bulldiv4'),
+            ('rsi_hidden_beardiv4', 'RSI_Hidden_BearDiv4', 'rsi_hidden_beardiv4'),
+            ('rsi_uptrend4', 'RSI_UpTrend4', 'rsi_uptrend4'),
+            ('rsi_downtrend4', 'RSI_DownTrend4', 'rsi_downtrend4'),
+            ('rsi5', 'RSI5', 'rsi5'),
+            ('rsi_signal5', 'RSI_Signal5', 'rsi_signal5'),
+            ('rsi_bulldiv5', 'RSI_BullDiv5', 'rsi_bulldiv5'),
+            ('rsi_beardiv5', 'RSI_BearDiv5', 'rsi_beardiv5'),
+            ('rsi_hidden_bulldiv5', 'RSI_Hidden_BullDiv5', 'rsi_hidden_bulldiv5'),
+            ('rsi_hidden_beardiv5', 'RSI_Hidden_BearDiv5', 'rsi_hidden_beardiv5'),
+            ('rsi_uptrend5', 'RSI_UpTrend5', 'rsi_uptrend5'),
+            ('rsi_downtrend5', 'RSI_DownTrend5', 'rsi_downtrend5'),
+            ('rsi6', 'RSI6', 'rsi6'),
+            ('rsi_signal6', 'RSI_Signal6', 'rsi_signal6'),
+            ('rsi_bulldiv6', 'RSI_BullDiv6', 'rsi_bulldiv6'),
+            ('rsi_beardiv6', 'RSI_BearDiv6', 'rsi_beardiv6'),
+            ('rsi_hidden_bulldiv6', 'RSI_Hidden_BullDiv6', 'rsi_hidden_bulldiv6'),
+            ('rsi_hidden_beardiv6', 'RSI_Hidden_BearDiv6', 'rsi_hidden_beardiv6'),
+            ('rsi_uptrend6', 'RSI_UpTrend6', 'rsi_uptrend6'),
+            ('rsi_downtrend6', 'RSI_DownTrend6', 'rsi_downtrend6'),
+            ('rsi7', 'RSI7', 'rsi7'),
+            ('rsi_signal7', 'RSI_Signal7', 'rsi_signal7'),
+            ('rsi_bulldiv7', 'RSI_BullDiv7', 'rsi_bulldiv7'),
+            ('rsi_beardiv7', 'RSI_BearDiv7', 'rsi_beardiv7'),
+            ('rsi_hidden_bulldiv7', 'RSI_Hidden_BullDiv7', 'rsi_hidden_bulldiv7'),
+            ('rsi_hidden_beardiv7', 'RSI_Hidden_BearDiv7', 'rsi_hidden_beardiv7'),
+            ('rsi_uptrend7', 'RSI_UpTrend7', 'rsi_uptrend7'),
+            ('rsi_downtrend7', 'RSI_DownTrend7', 'rsi_downtrend7'),
+            ('rsi8', 'RSI8', 'rsi8'),
+            ('rsi_signal8', 'RSI_Signal8', 'rsi_signal8'),
+            ('rsi_bulldiv8', 'RSI_BullDiv8', 'rsi_bulldiv8'),
+            ('rsi_beardiv8', 'RSI_BearDiv8', 'rsi_beardiv8'),
+            ('rsi_hidden_bulldiv8', 'RSI_Hidden_BullDiv8', 'rsi_hidden_bulldiv8'),
+            ('rsi_hidden_beardiv8', 'RSI_Hidden_BearDiv8', 'rsi_hidden_beardiv8'),
+            ('rsi_uptrend8', 'RSI_UpTrend8', 'rsi_uptrend8'),
+            ('rsi_downtrend8', 'RSI_DownTrend8', 'rsi_downtrend8'),
+            ('rsi9', 'RSI9', 'rsi9'),
+            ('rsi_signal9', 'RSI_Signal9', 'rsi_signal9'),
+            ('rsi_bulldiv9', 'RSI_BullDiv9', 'rsi_bulldiv9'),
+            ('rsi_beardiv9', 'RSI_BearDiv9', 'rsi_beardiv9'),
+            ('rsi_hidden_bulldiv9', 'RSI_Hidden_BullDiv9', 'rsi_hidden_bulldiv9'),
+            ('rsi_hidden_beardiv9', 'RSI_Hidden_BearDiv9', 'rsi_hidden_beardiv9'),
+            ('rsi_uptrend9', 'RSI_UpTrend9', 'rsi_uptrend9'),
+            ('rsi_downtrend9', 'RSI_DownTrend9', 'rsi_downtrend9'),
+            ('rsi_signal_sum', 'RSI_Signal_Sum', 'rsi_signal_sum'),
+            ('rsi_bulldiv_sum', 'RSI_BullDiv_Sum', 'rsi_bulldiv_sum'),
+            ('rsi_beardiv_sum', 'RSI_BearDiv_Sum', 'rsi_beardiv_sum'),
+            ('rsi_hidden_bulldiv_sum', 'RSI_Hidden_BullDiv_Sum', 'rsi_hidden_bulldiv_sum'),
+            ('rsi_hidden_beardiv_sum', 'RSI_Hidden_BearDiv_Sum', 'rsi_hidden_beardiv_sum'),
+            ('rsi_uptrend_sum', 'RSI_UpTrend_Sum', 'rsi_uptrend_sum'),
+            ('rsi_downtrend_sum', 'RSI_DownTrend_Sum', 'rsi_downtrend_sum'),
+            ('std20', 'STD20', 'std20'),
+            ('bollinger_high', 'BB_Upper', 'bb_upper'),
+            ('bollinger_low', 'BB_Lower', 'bb_lower'),
+            ('bb_width', 'BB_width', 'bb_width'),
+            ('cci', 'CCI', 'cci'),
+            ('cci_signal', 'CCI_Signal', 'cci_signal'),
+            ('cci2', 'CCI2', 'cci2'),
+            ('cci_signal2', 'CCI_Signal2', 'cci_signal2'),
+            ('cci3', 'CCI3', 'cci3'),
+            ('cci_signal3', 'CCI_Signal3', 'cci_signal3'),
+            ('cci4', 'CCI4', 'cci4'),
+            ('cci_signal4', 'CCI_Signal4', 'cci_signal4'),
+            ('cci5', 'CCI5', 'cci5'),
+            ('cci_signal5', 'CCI_Signal5', 'cci_signal5'),
+            ('cci6', 'CCI6', 'cci6'),
+            ('cci_signal6', 'CCI_Signal6', 'cci_signal6'),
+            ('cci7', 'CCI7', 'cci7'),
+            ('cci_signal7', 'CCI_Signal7', 'cci_signal7'),
+            ('cci8', 'CCI8', 'cci8'),
+            ('cci_signal8', 'CCI_Signal8', 'cci_signal8'),
+            ('cci9', 'CCI9', 'cci9'),
+            ('cci_signal9', 'CCI_Signal9', 'cci_signal9'),
+            ('cci_signal_sum', 'CCI_Signal_Sum', 'cci_signal_sum'),
+            ('macd', 'MACD', 'macd'),
+            ('macd_base', 'MACD_Base', 'macd_base'),
+            ('macd_hist', 'MACD_Hist', 'macd_hist'),
+            ('macd_hist_vel', 'MACD_Hist_Vel', 'macd_hist_vel'),
+            ('macd_hist_acc_pct', 'MACD_Hist_Acc_Pct', 'macd_hist_acc_pct'),
+            ('macd_positive', 'MACD_Positive', 'macd_positive'),
+            ('macd_signal', 'MACD_Signal', 'macd_signal'),
+            ('pdi', 'PDI', 'pdi'),
+            ('mdi', 'MDI', 'mdi'),
+            ('adx', 'ADX', 'adx'),
+            ('mom10', 'MOM10', 'mom10'),
+            ('mom14', 'MOM14', 'mom14'),
+            ('mom25', 'MOM25', 'mom25'),
+            ('mom28', 'MOM28', 'mom28'),
+            ('mom10_signal', 'MOM10_Signal', 'mom10_signal'),
+            ('mom14_signal', 'MOM14_Signal', 'mom14_signal'),
+            ('mom25_signal', 'MOM25_Signal', 'mom25_signal'),
+            ('mom28_signal', 'MOM28_Signal', 'mom28_signal'),
+            ('high_watermark', 'High_watermark', 'high_watermark'),
+            ('mdd', 'MDD', 'mdd'),
+            ('is_pinbar', 'Is_Pinbar', 'is_pinbar'),
+            ('bb_fakeout', 'BB_Fakeout', 'bb_fakeout'),
+            ('volume_climax', 'Volume_Climax', 'volume_climax'),
+        ]
+
         for _, row in df_clean.iterrows():
             d = row.get('Date', row.get('date'))
             sym = row.get('Symbol', row.get('symbol', row.get('Code', row.get('code'))))
             if not d or not sym:
                 continue
-            name = row.get('Name', row.get('name', ''))
-            mkt = row.get('Market', row.get('market', ''))
-            ma5 = row.get('MA5', row.get('ma5'))
-            ma20 = row.get('MA20', row.get('ma20'))
-            ma60 = row.get('MA60', row.get('ma60'))
-            ma120 = row.get('MA120', row.get('ma120'))
-            ma200 = row.get('MA200', row.get('ma200'))
-            rsi = row.get('RSI', row.get('rsi'))
-            macd = row.get('MACD', row.get('macd'))
-            macd_sig = row.get('MACD_Signal', row.get('macd_signal'))
-            adx = row.get('ADX', row.get('adx'))
-            boll_h = row.get('Bollinger_High', row.get('bollinger_high'))
-            boll_l = row.get('Bollinger_Low', row.get('bollinger_low'))
-            rsi_sig_sum = row.get('RSI_Signal_Sum', row.get('rsi_signal_sum'))
-            rsi_bull_sum = row.get('RSI_BullDiv_Sum', row.get('rsi_bulldiv_sum'))
-            rsi_bear_sum = row.get('RSI_BearDiv_Sum', row.get('rsi_beardiv_sum'))
-            rsi_hbull_sum = row.get('RSI_Hidden_BullDiv_Sum', row.get('rsi_hidden_bulldiv_sum'))
-            rsi_hbear_sum = row.get('RSI_Hidden_BearDiv_Sum', row.get('rsi_hidden_beardiv_sum'))
-            rsi_up_sum = row.get('RSI_UpTrend_Sum', row.get('rsi_uptrend_sum'))
-            rsi_dn_sum = row.get('RSI_DownTrend_Sum', row.get('rsi_downtrend_sum'))
-            cci_sig_sum = row.get('CCI_Signal_Sum', row.get('cci_signal_sum'))
             
-            records.append((
-                str(d), str(sym), str(name), str(mkt), ma5, ma20, ma60, ma120, ma200, 
-                rsi, macd, macd_sig, adx, boll_h, boll_l,
-                rsi_sig_sum, rsi_bull_sum, rsi_bear_sum, rsi_hbull_sum, rsi_hbear_sum,
-                rsi_up_sum, rsi_dn_sum, cci_sig_sum
-            ))
+            name = str(row.get('Name', row.get('name', '')))
+            mkt = str(row.get('Market', row.get('market', '')))
+            
+            val_tuple = [str(d), str(sym), name, mkt]
+            for db_c, py_c, py_c_low in col_mappings:
+                val = row.get(py_c, row.get(py_c_low))
+                
+                # Check for NaN/Inf/NaT and replace with None
+                if val is not None:
+                    if pd.isna(val):
+                        val = None
+                    elif isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
+                        val = None
+                
+                val_tuple.append(val)
+                
+            records.append(tuple(val_tuple))
 
-        if not records:
-            return
-
-        query = self.queries.get("013_upsert_technical_indicators.sql", """
-        INSERT INTO public.technical_indicators (
-            date, symbol, name, market, ma5, ma20, ma60, ma120, ma200, rsi, macd, macd_signal, adx, bollinger_high, bollinger_low,
-            rsi_signal_sum, rsi_bulldiv_sum, rsi_beardiv_sum, rsi_hidden_bulldiv_sum, rsi_hidden_beardiv_sum, rsi_uptrend_sum, rsi_downtrend_sum, cci_signal_sum
-        ) VALUES %s
+        cols_sql = 'date, symbol, name, market, ma1, ma2, ma3, ma4, ma5, ma6, ma7, ma8, ma9, ma20, ma50, ma60, ma90, ma120, ma200, ma224, close_diff_first, close_rate_first, currencyvolume, currencyvolume_ratio_ma20, obv, mobv, deltamobv, rsi, rsi_signal, rsi_bulldiv, rsi_beardiv, rsi_hidden_bulldiv, rsi_hidden_beardiv, rsi_uptrend, rsi_downtrend, rsi2, rsi_signal2, rsi_bulldiv2, rsi_beardiv2, rsi_hidden_bulldiv2, rsi_hidden_beardiv2, rsi_uptrend2, rsi_downtrend2, rsi3, rsi_signal3, rsi_bulldiv3, rsi_beardiv3, rsi_hidden_bulldiv3, rsi_hidden_beardiv3, rsi_uptrend3, rsi_downtrend3, rsi4, rsi_signal4, rsi_bulldiv4, rsi_beardiv4, rsi_hidden_bulldiv4, rsi_hidden_beardiv4, rsi_uptrend4, rsi_downtrend4, rsi5, rsi_signal5, rsi_bulldiv5, rsi_beardiv5, rsi_hidden_bulldiv5, rsi_hidden_beardiv5, rsi_uptrend5, rsi_downtrend5, rsi6, rsi_signal6, rsi_bulldiv6, rsi_beardiv6, rsi_hidden_bulldiv6, rsi_hidden_beardiv6, rsi_uptrend6, rsi_downtrend6, rsi7, rsi_signal7, rsi_bulldiv7, rsi_beardiv7, rsi_hidden_bulldiv7, rsi_hidden_beardiv7, rsi_uptrend7, rsi_downtrend7, rsi8, rsi_signal8, rsi_bulldiv8, rsi_beardiv8, rsi_hidden_bulldiv8, rsi_hidden_beardiv8, rsi_uptrend8, rsi_downtrend8, rsi9, rsi_signal9, rsi_bulldiv9, rsi_beardiv9, rsi_hidden_bulldiv9, rsi_hidden_beardiv9, rsi_uptrend9, rsi_downtrend9, rsi_signal_sum, rsi_bulldiv_sum, rsi_beardiv_sum, rsi_hidden_bulldiv_sum, rsi_hidden_beardiv_sum, rsi_uptrend_sum, rsi_downtrend_sum, std20, bollinger_high, bollinger_low, bb_width, cci, cci_signal, cci2, cci_signal2, cci3, cci_signal3, cci4, cci_signal4, cci5, cci_signal5, cci6, cci_signal6, cci7, cci_signal7, cci8, cci_signal8, cci9, cci_signal9, cci_signal_sum, macd, macd_base, macd_hist, macd_hist_vel, macd_hist_acc_pct, macd_positive, macd_signal, pdi, mdi, adx, mom10, mom14, mom25, mom28, mom10_signal, mom14_signal, mom25_signal, mom28_signal, high_watermark, mdd, is_pinbar, bb_fakeout, volume_climax'
+        query = self.queries.get("013_upsert_technical_indicators.sql", f"""
+        INSERT INTO public.technical_indicators ( {cols_sql} )
+        VALUES %s
         ON CONFLICT (date, symbol) DO UPDATE SET
-            name = EXCLUDED.name, market = EXCLUDED.market, ma5 = EXCLUDED.ma5, ma20 = EXCLUDED.ma20, ma60 = EXCLUDED.ma60, ma120 = EXCLUDED.ma120, ma200 = EXCLUDED.ma200, rsi = EXCLUDED.rsi, macd = EXCLUDED.macd, macd_signal = EXCLUDED.macd_signal, adx = EXCLUDED.adx, bollinger_high = EXCLUDED.bollinger_high, bollinger_low = EXCLUDED.bollinger_low,
-            rsi_signal_sum = EXCLUDED.rsi_signal_sum, rsi_bulldiv_sum = EXCLUDED.rsi_bulldiv_sum, rsi_beardiv_sum = EXCLUDED.rsi_beardiv_sum, rsi_hidden_bulldiv_sum = EXCLUDED.rsi_hidden_bulldiv_sum, rsi_hidden_beardiv_sum = EXCLUDED.rsi_hidden_beardiv_sum, rsi_uptrend_sum = EXCLUDED.rsi_uptrend_sum, rsi_downtrend_sum = EXCLUDED.rsi_downtrend_sum, cci_signal_sum = EXCLUDED.cci_signal_sum;
-        """)
+        """ + ", ".join([f"{c} = EXCLUDED.{c}" for c in cols_sql.split(", ") if c not in ["date", "symbol"]]) + ", created_at = CURRENT_TIMESTAMP;")
         try:
             with self.conn.cursor() as cur:
+                from psycopg2.extras import execute_values
                 execute_values(cur, query, records, page_size=1000)
                 print(f"[DBManager] 기술분석 지표 {len(records)} 레코드 Upsert 성공.")
         except Exception as e:
