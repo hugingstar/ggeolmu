@@ -101,6 +101,8 @@ erDiagram
         varchar symbol PK
         numeric rsi
         numeric macd
+        numeric rsi_signal_sum
+        numeric cci_signal_sum
     }
 
     TRADING_SIGNALS {

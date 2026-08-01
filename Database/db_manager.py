@@ -316,16 +316,33 @@ class DBManager:
             adx = row.get('ADX', row.get('adx'))
             boll_h = row.get('Bollinger_High', row.get('bollinger_high'))
             boll_l = row.get('Bollinger_Low', row.get('bollinger_low'))
-            records.append((str(d), str(sym), str(name), str(mkt), ma5, ma20, ma60, ma120, ma200, rsi, macd, macd_sig, adx, boll_h, boll_l))
+            rsi_sig_sum = row.get('RSI_Signal_Sum', row.get('rsi_signal_sum'))
+            rsi_bull_sum = row.get('RSI_BullDiv_Sum', row.get('rsi_bulldiv_sum'))
+            rsi_bear_sum = row.get('RSI_BearDiv_Sum', row.get('rsi_beardiv_sum'))
+            rsi_hbull_sum = row.get('RSI_Hidden_BullDiv_Sum', row.get('rsi_hidden_bulldiv_sum'))
+            rsi_hbear_sum = row.get('RSI_Hidden_BearDiv_Sum', row.get('rsi_hidden_beardiv_sum'))
+            rsi_up_sum = row.get('RSI_UpTrend_Sum', row.get('rsi_uptrend_sum'))
+            rsi_dn_sum = row.get('RSI_DownTrend_Sum', row.get('rsi_downtrend_sum'))
+            cci_sig_sum = row.get('CCI_Signal_Sum', row.get('cci_signal_sum'))
+            
+            records.append((
+                str(d), str(sym), str(name), str(mkt), ma5, ma20, ma60, ma120, ma200, 
+                rsi, macd, macd_sig, adx, boll_h, boll_l,
+                rsi_sig_sum, rsi_bull_sum, rsi_bear_sum, rsi_hbull_sum, rsi_hbear_sum,
+                rsi_up_sum, rsi_dn_sum, cci_sig_sum
+            ))
 
         if not records:
             return
 
         query = self.queries.get("013_upsert_technical_indicators.sql", """
-        INSERT INTO public.technical_indicators (date, symbol, name, market, ma5, ma20, ma60, ma120, ma200, rsi, macd, macd_signal, adx, bollinger_high, bollinger_low)
-        VALUES %s
+        INSERT INTO public.technical_indicators (
+            date, symbol, name, market, ma5, ma20, ma60, ma120, ma200, rsi, macd, macd_signal, adx, bollinger_high, bollinger_low,
+            rsi_signal_sum, rsi_bulldiv_sum, rsi_beardiv_sum, rsi_hidden_bulldiv_sum, rsi_hidden_beardiv_sum, rsi_uptrend_sum, rsi_downtrend_sum, cci_signal_sum
+        ) VALUES %s
         ON CONFLICT (date, symbol) DO UPDATE SET
-            name = EXCLUDED.name, market = EXCLUDED.market, ma5 = EXCLUDED.ma5, ma20 = EXCLUDED.ma20, ma60 = EXCLUDED.ma60, ma120 = EXCLUDED.ma120, ma200 = EXCLUDED.ma200, rsi = EXCLUDED.rsi, macd = EXCLUDED.macd, macd_signal = EXCLUDED.macd_signal, adx = EXCLUDED.adx, bollinger_high = EXCLUDED.bollinger_high, bollinger_low = EXCLUDED.bollinger_low;
+            name = EXCLUDED.name, market = EXCLUDED.market, ma5 = EXCLUDED.ma5, ma20 = EXCLUDED.ma20, ma60 = EXCLUDED.ma60, ma120 = EXCLUDED.ma120, ma200 = EXCLUDED.ma200, rsi = EXCLUDED.rsi, macd = EXCLUDED.macd, macd_signal = EXCLUDED.macd_signal, adx = EXCLUDED.adx, bollinger_high = EXCLUDED.bollinger_high, bollinger_low = EXCLUDED.bollinger_low,
+            rsi_signal_sum = EXCLUDED.rsi_signal_sum, rsi_bulldiv_sum = EXCLUDED.rsi_bulldiv_sum, rsi_beardiv_sum = EXCLUDED.rsi_beardiv_sum, rsi_hidden_bulldiv_sum = EXCLUDED.rsi_hidden_bulldiv_sum, rsi_hidden_beardiv_sum = EXCLUDED.rsi_hidden_beardiv_sum, rsi_uptrend_sum = EXCLUDED.rsi_uptrend_sum, rsi_downtrend_sum = EXCLUDED.rsi_downtrend_sum, cci_signal_sum = EXCLUDED.cci_signal_sum;
         """)
         try:
             with self.conn.cursor() as cur:

@@ -368,12 +368,22 @@ class FinancePipeline:
 
                         # 트레이딩 시그널 추출 및 삽입 (A1Sheet에 포함되어 있음)
                         signals_df = pd.DataFrame()
+                        
+                        if 'Buy_Signal' in df.columns:
+                            buy_idx = df['Buy_Signal'] == 1
+                            if buy_idx.any():
+                                b_df = df[buy_idx].copy()
+                                b_df['signal_type'] = 'BUY'
+                                b_df['description'] = 'MACD, RSI 상승장 다이버전스/골든크로스 매수 신호'
+                                b_df['signal_strength'] = 1.0
+                                signals_df = pd.concat([signals_df, b_df])
+
                         if 'Sell_Signal' in df.columns:
                             sell_idx = df['Sell_Signal'] == 1
                             if sell_idx.any():
                                 s_df = df[sell_idx].copy()
                                 s_df['signal_type'] = 'SELL'
-                                s_df['description'] = 'MACD, RSI, CCI 과매도 데드크로스 매도 신호'
+                                s_df['description'] = 'MACD, RSI 과매도 데드크로스 매도 신호'
                                 s_df['signal_strength'] = 1.0
                                 signals_df = pd.concat([signals_df, s_df])
                                 
@@ -438,23 +448,28 @@ class FinancePipeline:
         db = DBManager()
         c2_path = f"{self.base_path}/{market}/C2Sheet/{target_date}"
         if os.path.exists(c2_path):
-            for file in os.listdir(c2_path):
-                if 'elbow' not in file and file.endswith('.csv'):
-                    df = self._safe_read_csv(os.path.join(c2_path, file))
-                    if not df.empty:
-                        df['Market'] = market
-                        df['TargetDate'] = target_date
-                        if 'Symbol' not in df.columns:
-                            df['Symbol'] = df[df.columns[0]]
-                        if 'clusters' in df.columns:
-                            df['Cluster_ID'] = df['clusters']
-                        elif 'Cluster' in df.columns:
-                            df['Cluster_ID'] = df['Cluster']
-                        
-                        clean_name = file.replace('normalized_', '').replace('.csv', '')
-                        method_name = clean_name.split('_k')[0] if '_k' in clean_name else clean_name
-                        df['Method'] = method_name
-                        db.upsert_clustering_results(df)
+            for method_dir in os.listdir(c2_path):
+                method_path = os.path.join(c2_path, method_dir)
+                if os.path.isdir(method_path):
+                    for file in os.listdir(method_path):
+                        if 'elbow' not in file and file.endswith('.parquet'):
+                            df = pd.read_parquet(os.path.join(method_path, file))
+                            if not df.empty:
+                                df = df.reset_index()
+                                df['Market'] = market
+                                df['TargetDate'] = target_date
+                                if 'symbol' in df.columns:
+                                    df['Symbol'] = df['symbol']
+                                elif 'Symbol' not in df.columns:
+                                    df['Symbol'] = df[df.columns[0]]
+                                    
+                                if 'clusters' in df.columns:
+                                    df['Cluster_ID'] = df['clusters']
+                                elif 'Cluster' in df.columns:
+                                    df['Cluster_ID'] = df['Cluster']
+                                
+                                df['Method'] = method_dir
+                                db.upsert_clustering_results(df)
 
     def run_kr_markets(self):
         """국내 시장(KOSPI, KOSDAQ) 자동 태스크 - 병렬 최적화 구조"""

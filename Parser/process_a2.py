@@ -295,6 +295,39 @@ class DaskFinanceProcessor:
             complex_condition | dead_cross, 1, 0
         )
 
+        # ----- Buy_Signal -----
+        # 1. 하락 추세 중지 조건: 하락 에너지(MDI)가 상승 에너지(PDI)보다 크고 ADX 임계 이상
+        trend_negative = (
+            (all_new_features["MDI"] > all_new_features["PDI"]) &
+            (all_new_features["ADX"] > cfg["adx_threshold"])
+        )
+
+        # 2. 침체 필터: ADX 과열 중 PDI가 고개를 들기 시작할 때
+        extreme_filter_buy = (all_new_features["PDI"] > all_new_features["PDI"].shift(1))
+
+        # 3. 경로 A: 다이버전스 + 골든크로스 결합
+        complex_condition_buy = (
+            (all_new_features["MACD_Positive"] == 0) &      # MACD 0선 아래
+            (all_new_features["MACD_Signal"] == 1) &        # MACD 골든크로스
+            ((all_new_features["RSI_BullDiv_Sum"] > 0) | (all_new_features["RSI_Hidden_BullDiv_Sum"] > 0)) &
+            trend_negative &
+            extreme_filter_buy
+        )
+
+        # 4. 경로 B: 골든크로스 신호
+        pdi_mean = all_new_features["PDI"].rolling(window=cfg["mdi_acceleration_window"]).mean()
+        pdi_acceleration = all_new_features["PDI"] > (pdi_mean * cfg["mdi_acceleration_mult"])
+        golden_cross = (
+            (all_new_features["ADX"] > cfg["adx_threshold"]) &
+            (all_new_features["MDI"] - all_new_features["PDI"] < cfg["dead_cross_diff"]) &
+            pdi_acceleration
+        )
+
+        # 5. 최종 매수 신호: 경로 A OR 경로 B
+        all_new_features["Buy_Signal"] = np.where(
+            complex_condition_buy | golden_cross, 1, 0
+        )
+
         # ==================================================================
         # [추가] 유동성 사냥(Liquidity Sweep / Stop Hunt) 탐지 및 스마트 매수 신호
         # ==================================================================

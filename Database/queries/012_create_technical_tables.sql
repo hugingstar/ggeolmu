@@ -17,6 +17,14 @@ CREATE TABLE IF NOT EXISTS public.technical_indicators (
     adx NUMERIC,
     bollinger_high NUMERIC,
     bollinger_low NUMERIC,
+    rsi_signal_sum NUMERIC,
+    rsi_bulldiv_sum NUMERIC,
+    rsi_beardiv_sum NUMERIC,
+    rsi_hidden_bulldiv_sum NUMERIC,
+    rsi_hidden_beardiv_sum NUMERIC,
+    rsi_uptrend_sum NUMERIC,
+    rsi_downtrend_sum NUMERIC,
+    cci_signal_sum NUMERIC,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (date, symbol)
 );
