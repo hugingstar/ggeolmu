@@ -149,6 +149,17 @@ def get_kospi200_dask_data(start_date, num_stocks, output_path, market_name, sle
     # 1. DB 최신 날짜 우선 탐지 (Parquet 파일 의존성 제거)
     max_date = get_db_max_date()
     
+    # [복구 로직 추가] DB가 비어있어도 로컬에 과거 Parquet 파일이 있다면 그 날짜를 이어받아 20분 풀스캔 방지
+    if (max_date is None or pd.isnull(max_date)) and os.path.exists(parquet_path):
+        try:
+            print(f"[{market_name}] DB 데이터가 없어 로컬 Parquet 파일({parquet_path})에서 기존 날짜를 복원합니다...", flush=True)
+            import dask.dataframe as dd
+            existing_df = dd.read_parquet(parquet_path).compute()
+            if 'Date' in existing_df.columns and not existing_df.empty:
+                max_date = pd.to_datetime(existing_df['Date']).max()
+        except Exception as e:
+            print(f"[{market_name}] 로컬 Parquet 읽기 실패: {e}")
+            existing_df = None
     # 2. 실제 최근 영업일 파악 (시차 및 주말/휴장일 동기화)
     benchmark_symbol = "005930" if market_name in ["KOSPI", "KOSDAQ"] else "AAPL"
     try:
