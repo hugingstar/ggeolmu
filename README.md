@@ -99,10 +99,16 @@ erDiagram
     TECHNICAL_INDICATORS {
         date date PK
         varchar symbol PK
-        numeric rsi
-        numeric macd
-        numeric rsi_signal_sum
-        numeric cci_signal_sum
+        numeric MA_and_Price "MA1~224, Close_diff"
+        numeric CurrencyVolume "Vol_Ratio_MA20"
+        numeric OBV_MOBV "OBV, DeltaMOBV"
+        numeric RSI_and_Div "RSI1~9, Signals, Sums"
+        numeric Bollinger_Band "STD20, BB_Up/Low"
+        numeric CCI_and_Signals "CCI1~9, Sums"
+        numeric MACD_and_Signals "MACD, Base, Hist"
+        numeric ADX_DMI "PDI, MDI, ADX"
+        numeric Momentum "MOM10~28, Signals"
+        numeric MDD_HighWater "MDD"
     }
 
     TRADING_SIGNALS {
@@ -149,39 +155,6 @@ erDiagram
     RAW_STOCK_DATA ||--o{ CLUSTERING_RESULTS : "패턴 군집"
     RAW_STOCK_DATA ||--o{ PROMPT_LOGS : "에이전트 기록"
     RAW_STOCK_DATA ||--o{ PIPELINE_EXECUTION_LOGS : "파이프라인 라이프사이클"
-```
-
----
-
-## 3. 4-Tier 아키텍처 구성 및 역할
-
-- **WEB Tier (`Web/`)**: Vanilla JS 및 CSS Glassmorphism 기반 SPA. 반응형 상대 크기 조절 레이아웃 적용 (5개관제 페이지 UI/UX 개편 및 네비게이션 헤더 메뉴 통합).
-- **WAS Tier (`WAS/app.py`)**: FastAPI 기반 비동기 REST API 서빙 (`GET /api/pipeline/logs`, `GET /api/analytics` 종목명 유연 매핑) 및 정적 웹 리소스 제공.
-- **DB Tier (`Database/`)**: PostgreSQL DBMS. `Database/queries/` 수록 `001_`~`016_` SQL 쿼리 중앙 통합 관리 (SQL Injection 방지).
-- **Manager Tier (`Manager/`)**:
-  - `PipelineLifecycleAgent`: 파이프라인 실행 시작/끝 시간, 소요시간(초), 세부 단계 상태, 에러 로그 모니터링 관리.
-  - `AuditAgent`: 불필요 종목(ETF/SPAC) 필터링 및 프롬프트 주입/SQLi 검사.
-  - `PromptMakerAgent`: 5일 주가 흐름 기반 퀀트 메타 프롬프트 일괄 생성.
-  - `WebSecurityAgent`: WEB-WAS-DB 계층 취약점 탐지 및 보안 관리.
-
----
-
-## 4. 실행 방법
-
-### 1) PostgreSQL DB 구동
-```bash
-docker compose up -d
-```
-
-### 2) 웹/WAS 애플리케이션 실행
-```bash
-python WAS/app.py
-```
-접속 URL: `http://localhost:8000` (파이프라인 관제: `http://localhost:8000/pipeline`)
-
-### 3) 데이터 증분 수집 파이프라인 실행
-```bash
-python Parser/main.py
 ```
 
 ---
@@ -235,4 +208,39 @@ flowchart LR
 
     Group4 --> End(("Output DataFrame")):::largeFont
 ```
+
+---
+
+## 3. 4-Tier 아키텍처 구성 및 역할
+
+- **WEB Tier (`Web/`)**: Vanilla JS 및 CSS Glassmorphism 기반 SPA. 반응형 상대 크기 조절 레이아웃 적용 (5개관제 페이지 UI/UX 개편 및 네비게이션 헤더 메뉴 통합).
+- **WAS Tier (`WAS/app.py`)**: FastAPI 기반 비동기 REST API 서빙 (`GET /api/pipeline/logs`, `GET /api/analytics` 종목명 유연 매핑) 및 정적 웹 리소스 제공.
+- **DB Tier (`Database/`)**: PostgreSQL DBMS. `Database/queries/` 수록 `001_`~`016_` SQL 쿼리 중앙 통합 관리 (SQL Injection 방지).
+- **Manager Tier (`Manager/`)**:
+  - `PipelineLifecycleAgent`: 파이프라인 실행 시작/끝 시간, 소요시간(초), 세부 단계 상태, 에러 로그 모니터링 관리.
+  - `AuditAgent`: 불필요 종목(ETF/SPAC) 필터링 및 프롬프트 주입/SQLi 검사.
+  - `PromptMakerAgent`: 5일 주가 흐름 기반 퀀트 메타 프롬프트 일괄 생성.
+  - `WebSecurityAgent`: WEB-WAS-DB 계층 취약점 탐지 및 보안 관리.
+
+---
+
+## 4. 실행 방법
+
+### 1) PostgreSQL DB 구동
+```bash
+docker compose up -d
+```
+
+### 2) 웹/WAS 애플리케이션 실행
+```bash
+python WAS/app.py
+```
+접속 URL: `http://localhost:8000` (파이프라인 관제: `http://localhost:8000/pipeline`)
+
+### 3) 데이터 증분 수집 파이프라인 실행
+```bash
+python Parser/main.py
+```
+
+
 
