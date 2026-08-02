@@ -183,3 +183,31 @@ python WAS/app.py
 ```bash
 python Parser/main.py
 ```
+
+---
+
+### 2.3 `calculate_indicators` 지표 연산 흐름도 (Process A1)
+
+기술적 지표 계산 및 유동성 사냥(조작) 패턴 필터링의 단계별 수행 과정을 나타냅니다.
+
+```mermaid
+graph TD
+    classDef largeFont font-size:18px, padding:15px, line-height:1.5;
+
+    Start((<br>Start: Input Data<br>)):::largeFont --> Step1
+
+    Step1[<br>1. 이동평균선 (MA) 및<br>종가 등락폭/등락률 계산<br>]:::largeFont --> Step2
+    Step2[<br>2. 거래대금 (CurrencyVolume) 및<br>20일 이평 대비 비율 계산<br>]:::largeFont --> Step3
+    Step3[<br>3. OBV, MOBV, DeltaMOBV<br>(누적 거래량 지표) 계산<br>]:::largeFont --> Step4
+    Step4[<br>4. RSI 지표 계산<br>- 기본 RSI 및 이동평균<br>- 다이버전스 (일반/히든) 탐지<br>- 합계 시그널 산출<br>]:::largeFont --> Step5
+    Step5[<br>5. 볼린저 밴드 (Bollinger Band)<br>- 상/하단선 및 밴드폭 계산<br>]:::largeFont --> Step6
+    Step6[<br>6. CCI (Commodity Channel Index)<br>- 기본 및 이동평균 산출<br>- 합계 시그널 산출<br>]:::largeFont --> Step7
+    Step7[<br>7. MACD 지표 계산<br>- MACD, 시그널선, 히스토그램<br>- 가속도 및 양수/음수 전환<br>]:::largeFont --> Step8
+    Step8[<br>8. ADX, PDI, MDI<br>(방향성 및 추세 강도) 계산<br>]:::largeFont --> Step9
+    Step9[<br>9. 단/중기 모멘텀 (Momentum)<br>비율 및 시그널 계산<br>]:::largeFont --> Step10
+    Step10[<br>10. 최고점 갱신 및<br>MDD (최대 낙폭) 계산<br>]:::largeFont --> Step11
+    Step11[<br>11. 최종 매수/매도 시그널 도출<br>- 매도: 과열 + 하락 태동 or 데드크로스<br>- 매수: 침체 다이버전스 or 골든크로스<br>]:::largeFont --> End
+
+    End((<br>End: Output DataFrame 반환<br>)):::largeFont
+```
+
