@@ -23,9 +23,9 @@ flowchart TD
     %% 1단계: DB 중심 지능형 증분 수집 (Smart Ingestion)
     subgraph Step1 ["1단계: DB 중심 지능형 증분 수집 (Smart Ingestion)"]
         direction TB
-        DB_Check{"기존 데이터(MAX Date) 확인"}:::logicNode
+        DB_Check{"기존 데이터 MAX Date 확인"}:::logicNode
         
-        DB_Check -->|초기 구동, 데이터 없음| FullFetch["🐍 2000년부터 풀 데이터 수집<br>(Dask 병렬, 약 20분 소요)"]:::pythonEngine
+        DB_Check -->|초기 구동 데이터 없음| FullFetch["🐍 2000년부터 풀 데이터 수집<br>(Dask 병렬, 약 20분 소요)"]:::pythonEngine
         DB_Check -->|기존 데이터 존재| DeltaFetch["⚡ 0.5초 초고속 증분 수집<br>(어제/최신 시세만 일괄 적재)"]:::pythonEngine
         
         DB_Raw[("💾 DB: raw_stock_data<br>(16개 SQL 중앙 관리)")]:::dbStorage
@@ -37,7 +37,7 @@ flowchart TD
     subgraph Step2 ["2단계: 지표 가공 & 시그널 생성 (Dynamic RAM Control)"]
         direction TB
         ProcessA1["🐍 process_a1.py<br>(Dynamic RAM Control / MA,RSI,MACD,Sell_Signal)"]:::pythonEngine
-        ProcessA1 -->|지표 덮어쓰기 (Upsert)| DB_Tech[("💾 DB: technical_indicators")]:::dbStorage
+        ProcessA1 -->|지표 덮어쓰기 Upsert| DB_Tech[("💾 DB: technical_indicators")]:::dbStorage
         ProcessA1 -->|시그널 직행 저장| DB_Signal[("💾 DB: trading_signals")]:::dbStorage
         ProcessA1 -->|지표 릴레이| ProcessB3["🐍 process_b3.py<br>(상승/하락/다이버전스 시계열 집계)"]:::pythonEngine
     end
@@ -47,7 +47,7 @@ flowchart TD
         direction TB
         ProcessM1["🐍 process_m1_cap.py<br>(시가총액 데이터 가공)"]:::pythonEngine -->|시총 저장| DB_Cap[("💾 DB: market_cap")]:::dbStorage
         ProcessM1 -->|정규화| ProcessC1["🐍 process_c1.py<br>(1d/1w/1m Z-Score 산출)"]:::pythonEngine
-        ProcessC1 -->|Z-Score 저장| DB_ZScore[("💾 DB: zscore_features")]:::dbStorage
+        ProcessC1 -->|Z_Score 저장| DB_ZScore[("💾 DB: zscore_features")]:::dbStorage
         ProcessC1 -->|SoftDTW 군집화| ProcessC2["🐍 process_c2.py<br>(SoftDTW K-Means 군집화)"]:::pythonEngine
         ProcessC2 -->|군집 결과 저장| DB_Cluster[("💾 DB: clustering_results")]:::dbStorage
     end
@@ -72,7 +72,8 @@ flowchart TD
     %% [위에서 아래로 이어지는 수직 메인 데이터 흐름선]
     Step1 ==>|1. raw_stock_data 공급| Step2
     Step1 ==>|2. raw_stock_data 공급| Step3
-    Step2 & Step3 ==>|3. 분석 지표/시그널/군집 공급| Step4
+    Step2 ==>|3. 분석 지표 및 시그널 공급| Step4
+    Step3 ==>|4. 군집 공급| Step4
 ```
 
 ---
