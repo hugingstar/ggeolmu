@@ -23,12 +23,14 @@ flowchart TD
     %% 1단계: DB 중심 지능형 증분 수집 (Smart Ingestion)
     subgraph Step1 ["1단계: DB 중심 지능형 증분 수집 (Smart Ingestion)"]
         direction TB
-        DB_Check{"DB내 기존 데이터(MAX Date) 확인"}:::logicNode
+        DB_Check{"기존 데이터(MAX Date) 확인"}:::logicNode
         
-        DB_Check -- "초기 구동 (데이터 없음)" --> FullFetch["🐍 2000년부터 풀 데이터 수집<br>(Dask 병렬, 약 20분 소요)"]:::pythonEngine
-        DB_Check -- "기존 데이터 존재" --> DeltaFetch["⚡ 0.5초 초고속 증분 수집<br>(어제/최신 시세만 일괄 적재)"]:::pythonEngine
+        DB_Check -->|초기 구동, 데이터 없음| FullFetch["🐍 2000년부터 풀 데이터 수집<br>(Dask 병렬, 약 20분 소요)"]:::pythonEngine
+        DB_Check -->|기존 데이터 존재| DeltaFetch["⚡ 0.5초 초고속 증분 수집<br>(어제/최신 시세만 일괄 적재)"]:::pythonEngine
         
-        FullFetch & DeltaFetch -->|안전한 Upsert (중복방지)| DB_Raw[("💾 DB: raw_stock_data<br>(16개 SQL 중앙 관리)")]:::dbStorage
+        DB_Raw[("💾 DB: raw_stock_data<br>(16개 SQL 중앙 관리)")]:::dbStorage
+        FullFetch -->|안전한 Upsert 중복방지| DB_Raw
+        DeltaFetch -->|안전한 Upsert 중복방지| DB_Raw
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
