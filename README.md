@@ -191,23 +191,48 @@ python Parser/main.py
 기술적 지표 계산 및 유동성 사냥(조작) 패턴 필터링의 단계별 수행 과정을 나타냅니다.
 
 ```mermaid
-graph TD
-    classDef largeFont font-size:16px, padding:15px, line-height:1.5;
+flowchart LR
+    classDef largeFont font-size:15px, padding:10px, line-height:1.4;
 
-    Start(("Start: Input Data")):::largeFont --> Step1
+    Start(("Input Data")):::largeFont --> Group1
 
-    Step1["1. MA & Price<br>MA1~MA224, Close_diff_first, Close_rate_first"]:::largeFont --> Step2
-    Step2["2. CurrencyVolume<br>CurrencyVolume, CurrencyVolume_Ratio_MA20"]:::largeFont --> Step3
-    Step3["3. OBV<br>OBV, MOBV, DeltaMOBV"]:::largeFont --> Step4
-    Step4["4. RSI & Divergence<br>RSI, RSI2~9, RSI_Signal, RSI_Signal2~9<br>RSI_BullDiv, RSI_BearDiv, RSI_Hidden_BullDiv, RSI_Hidden_BearDiv<br>RSI_UpTrend, RSI_DownTrend<br>RSI_Signal_Sum, RSI_BullDiv_Sum, RSI_BearDiv_Sum..."]:::largeFont --> Step5
-    Step5["5. Bollinger Band<br>STD20, BB_Upper, BB_Lower, BB_width"]:::largeFont --> Step6
-    Step6["6. CCI<br>CCI, CCI2~9, CCI_Signal, CCI_Signal2~9, CCI_Signal_Sum"]:::largeFont --> Step7
-    Step7["7. MACD<br>MACD, MACD_Base, MACD_Hist, MACD_Hist_Vel, MACD_Hist_Acc_Pct, MACD_Positive, MACD_Signal"]:::largeFont --> Step8
-    Step8["8. ADX/DMI<br>PDI, MDI, ADX"]:::largeFont --> Step9
-    Step9["9. Momentum<br>MOM10, MOM14, MOM25, MOM28<br>MOM10_Signal, MOM14_Signal, MOM25_Signal, MOM28_Signal"]:::largeFont --> Step10
-    Step10["10. MDD<br>High_watermark, MDD"]:::largeFont --> Step11
-    Step11["11. Trading Signals<br>Sell_Signal, Buy_Signal"]:::largeFont --> End
+    subgraph Group1 ["1. 가격 & 거래량 지표"]
+        direction TB
+        Step1["1. MA & Price<br>MA1~MA224, Close_diff_first, Close_rate_first"]:::largeFont
+        Step2["2. CurrencyVolume<br>CurrencyVolume, CurrencyVolume_Ratio_MA20"]:::largeFont
+        Step3["3. OBV<br>OBV, MOBV, DeltaMOBV"]:::largeFont
+        Step1 --> Step2 --> Step3
+    end
 
-    End(("End: Output DataFrame")):::largeFont
+    Group1 --> Group2
+
+    subgraph Group2 ["2. 오실레이터 & 밴드 지표"]
+        direction TB
+        Step4["4. RSI & Divergence<br>RSI, RSI2~9, RSI_Signal, RSI_Signal2~9<br>RSI_BullDiv, RSI_BearDiv, RSI_Hidden_BullDiv, RSI_Hidden_BearDiv<br>RSI_UpTrend, RSI_DownTrend<br>RSI_Signal_Sum, RSI_BullDiv_Sum, RSI_BearDiv_Sum<br>RSI_Hidden_BullDiv_Sum, RSI_Hidden_BearDiv_Sum<br>RSI_UpTrend_Sum, RSI_DownTrend_Sum"]:::largeFont
+        Step5["5. Bollinger Band<br>STD20, BB_Upper, BB_Lower, BB_width"]:::largeFont
+        Step6["6. CCI<br>CCI, CCI2~9, CCI_Signal, CCI_Signal2~9, CCI_Signal_Sum"]:::largeFont
+        Step4 --> Step5 --> Step6
+    end
+
+    Group2 --> Group3
+
+    subgraph Group3 ["3. 추세 & 모멘텀 지표"]
+        direction TB
+        Step7["7. MACD<br>MACD, MACD_Base, MACD_Hist, MACD_Hist_Vel<br>MACD_Hist_Acc_Pct, MACD_Positive, MACD_Signal"]:::largeFont
+        Step8["8. ADX/DMI<br>PDI, MDI, ADX"]:::largeFont
+        Step9["9. Momentum<br>MOM10, MOM14, MOM25, MOM28<br>MOM10_Signal, MOM14_Signal, MOM25_Signal, MOM28_Signal"]:::largeFont
+        Step7 --> Step8 --> Step9
+    end
+
+    Group3 --> Group4
+
+    subgraph Group4 ["4. 최종 시그널"]
+        direction TB
+        Step10["10. MDD<br>High_watermark, MDD"]:::largeFont
+        Step11["11. Trading Signals<br>Sell_Signal, Buy_Signal"]:::largeFont
+        Step10 --> Step11
+    end
+
+    Group4 --> End(("Output DataFrame")):::largeFont
 ```
 
