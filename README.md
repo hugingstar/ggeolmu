@@ -239,6 +239,9 @@ flowchart LR
    - `technical_indicators` 및 `trading_signals`와 같은 파생 데이터 테이블은 구조가 변경되더라도 `raw_stock_data`를 기반으로 100% 자동 재계산이 가능합니다. 컬럼 추가 시 기존 테이블을 `DROP`하기만 하면 다음 파이프라인 주기에서 완벽한 새 구조로 복구(Reconstruct)됩니다.
 4. **안전한 DB 병합 (PostgreSQL ON CONFLICT Upsert)**
    - 데이터를 적재할 때 단순 `INSERT`가 아닌 `ON CONFLICT (date, symbol) DO UPDATE` 패턴을 적용하여, 중복 실행이나 과거 데이터 재수집 시에도 무결성을 100% 보장하며 데이터 꼬임(Duplicate Key Error)을 방지합니다.
+5. **트랜잭션 안전성을 위한 일괄 적재 (Bulk Insert Architecture)**
+   - **부분 업데이트 방지**: 수집 도중 중간중간 DB에 기록할 경우, 예기치 않은 중단 시 DB가 부분적으로 오염되어 다음 증분 탐지(`MAX(date)`) 로직이 붕괴될 위험이 있습니다.
+   - **All-or-Nothing 보장**: 이를 방지하기 위해 Dask가 100% 수집을 완료한 거대한 데이터(약 1,400만 행)를 한 번의 트랜잭션으로 밀어 넣는 방식을 채택했습니다. 이는 2,463번의 잦은 쓰기 락(Lock)을 방지하고 파이프라인의 데이터 신뢰도를 극대화합니다.
 
 ---
 
