@@ -192,22 +192,22 @@ python Parser/main.py
 
 ```mermaid
 graph TD
-    classDef largeFont font-size:18px, padding:15px, line-height:1.5;
+    classDef largeFont font-size:16px, padding:15px, line-height:1.5;
 
-    Start((<br>Start: Input Data<br>)):::largeFont --> Step1
+    Start(("Start: Input Data")):::largeFont --> Step1
 
-    Step1[<br>1. 이동평균선 (MA) 및<br>종가 등락폭/등락률 계산<br>]:::largeFont --> Step2
-    Step2[<br>2. 거래대금 (CurrencyVolume) 및<br>20일 이평 대비 비율 계산<br>]:::largeFont --> Step3
-    Step3[<br>3. OBV, MOBV, DeltaMOBV<br>(누적 거래량 지표) 계산<br>]:::largeFont --> Step4
-    Step4[<br>4. RSI 지표 계산<br>- 기본 RSI 및 이동평균<br>- 다이버전스 (일반/히든) 탐지<br>- 합계 시그널 산출<br>]:::largeFont --> Step5
-    Step5[<br>5. 볼린저 밴드 (Bollinger Band)<br>- 상/하단선 및 밴드폭 계산<br>]:::largeFont --> Step6
-    Step6[<br>6. CCI (Commodity Channel Index)<br>- 기본 및 이동평균 산출<br>- 합계 시그널 산출<br>]:::largeFont --> Step7
-    Step7[<br>7. MACD 지표 계산<br>- MACD, 시그널선, 히스토그램<br>- 가속도 및 양수/음수 전환<br>]:::largeFont --> Step8
-    Step8[<br>8. ADX, PDI, MDI<br>(방향성 및 추세 강도) 계산<br>]:::largeFont --> Step9
-    Step9[<br>9. 단/중기 모멘텀 (Momentum)<br>비율 및 시그널 계산<br>]:::largeFont --> Step10
-    Step10[<br>10. 최고점 갱신 및<br>MDD (최대 낙폭) 계산<br>]:::largeFont --> Step11
-    Step11[<br>11. 최종 매수/매도 시그널 도출<br>- 매도: 과열 + 하락 태동 or 데드크로스<br>- 매수: 침체 다이버전스 or 골든크로스<br>]:::largeFont --> End
+    Step1["1. MA & Price<br>MA1~MA224, Close_diff_first, Close_rate_first"]:::largeFont --> Step2
+    Step2["2. CurrencyVolume<br>CurrencyVolume, CurrencyVolume_Ratio_MA20"]:::largeFont --> Step3
+    Step3["3. OBV<br>OBV, MOBV, DeltaMOBV"]:::largeFont --> Step4
+    Step4["4. RSI & Divergence<br>RSI, RSI2~9, RSI_Signal, RSI_Signal2~9<br>RSI_BullDiv, RSI_BearDiv, RSI_Hidden_BullDiv, RSI_Hidden_BearDiv<br>RSI_UpTrend, RSI_DownTrend<br>RSI_Signal_Sum, RSI_BullDiv_Sum, RSI_BearDiv_Sum..."]:::largeFont --> Step5
+    Step5["5. Bollinger Band<br>STD20, BB_Upper, BB_Lower, BB_width"]:::largeFont --> Step6
+    Step6["6. CCI<br>CCI, CCI2~9, CCI_Signal, CCI_Signal2~9, CCI_Signal_Sum"]:::largeFont --> Step7
+    Step7["7. MACD<br>MACD, MACD_Base, MACD_Hist, MACD_Hist_Vel, MACD_Hist_Acc_Pct, MACD_Positive, MACD_Signal"]:::largeFont --> Step8
+    Step8["8. ADX/DMI<br>PDI, MDI, ADX"]:::largeFont --> Step9
+    Step9["9. Momentum<br>MOM10, MOM14, MOM25, MOM28<br>MOM10_Signal, MOM14_Signal, MOM25_Signal, MOM28_Signal"]:::largeFont --> Step10
+    Step10["10. MDD<br>High_watermark, MDD"]:::largeFont --> Step11
+    Step11["11. Trading Signals<br>Sell_Signal, Buy_Signal"]:::largeFont --> End
 
-    End((<br>End: Output DataFrame 반환<br>)):::largeFont
+    End(("End: Output DataFrame")):::largeFont
 ```
 
