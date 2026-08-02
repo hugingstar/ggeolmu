@@ -81,8 +81,11 @@ class DBManager:
                     idx_query = self.get_query("011_create_stock_indexes.sql")
                     if idx_query:
                         cur.execute(idx_query)
+                    tech_query = self.get_query("012_create_technical_tables.sql")
+                    if tech_query:
+                        cur.execute(tech_query)
             except Exception as e:
-                print(f"[DBManager] Table creation failed (001): {e}")
+                print(f"[DBManager] Table creation failed (001, 011, 012): {e}")
 
         log_create_query = self.get_query("015_create_pipeline_logs.sql")
         if log_create_query:
