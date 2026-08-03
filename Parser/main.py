@@ -177,7 +177,7 @@ class FinancePipeline:
         except Exception as e:
             agent.finish_pipeline(exec_id, market=f"{market}_DATA_PIPELINE", start_time=now, status="FAILED", error=e)
             raise e
-        # self._upsert_b1(market, now, start_date_5d)
+        # self._upsert_b1(market, now, start_date_5d) (제거됨)
         
         print(f"[{datetime.now(self.kst).strftime('%Y-%m-%d %H:%M:%S')}] {market} 1~4단계 파이프라인 완료")
 
@@ -191,7 +191,7 @@ class FinancePipeline:
         # 5단계: M1 Process (클러스터링 데이터 전처리)
         print(f"[*] 5단계: {market} M1 Process (시가총액 등 클러스터링 기초 데이터 전처리)...")
         run_process(base_path=self.base_path, target_date=target_date, market=market)
-        self._upsert_m1(market, target_date)
+        # self._upsert_m1(market, target_date) (제거됨)
         
         # 6단계: C1 Process (Z-Score 및 통계 데이터 생성)
         # [수정] start_date를 today_date 기준 365일 전으로 설정
@@ -208,7 +208,7 @@ class FinancePipeline:
             frequencies=["1d", "1w", "1m"],
             exclude_keywords=self.exclude_words
         )
-        self._upsert_c1(market)
+        # self._upsert_c1(market) (제거됨)
 
         # 7단계: C2 Process (시계열 클러스터링 결과)
         print(f"[*] 7단계: {market} C2 Process (시계열 기반 DTw 클러스터링)...")
@@ -238,7 +238,6 @@ class FinancePipeline:
         }
 
         self._run_clustering(market, config_c2)
-        self._upsert_c2(market, target_date)
 
 
         # C2Sheet 선별 업로드 제거됨
@@ -333,136 +332,7 @@ class FinancePipeline:
     # ==========================================================
     # 스텝별 DB 적재 헬퍼 메서드 모음
     # ==========================================================
-    def _upsert_a1(self, market):
-        print(f"[*] A1Sheet DB 적재 시작: {market}")
-        import sys
-        import os
-        import re
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Database')
-        if db_path not in sys.path:
-            sys.path.insert(0, db_path)
-        a1_path = f"{self.base_path}/{market}/A1Sheet"
-        if os.path.exists(a1_path):
-            for file in os.listdir(a1_path):
-                if file.endswith('.parquet') or file.endswith('.csv'):
-                    df = self._safe_read_file(os.path.join(a1_path, file))
-                    if not df.empty:
-                        if 'Market' not in df.columns:
-                            df['Market'] = market
-                        if 'Name' not in df.columns:
-                            name_part = file.split('(')[0]
-                            df['Name'] = name_part
-                        if 'Symbol' not in df.columns:
-                            # 파일명 "삼성전자(005930).parquet"에서 "005930" 추출
-                            match = re.search(r'\((.*?)\)', file)
-                            if match:
-                                df['Symbol'] = match.group(1)
-                            else:
-                                df['Symbol'] = file.split('.')[0]
-                        # DB 컬럼명 매핑 (BB_Upper -> Bollinger_High, BB_Lower -> Bollinger_Low)
-                        if 'BB_Upper' in df.columns:
-                            df.rename(columns={'BB_Upper': 'Bollinger_High'}, inplace=True)
-                        if 'BB_Lower' in df.columns:
-                            df.rename(columns={'BB_Lower': 'Bollinger_Low'}, inplace=True)
-
-                        db.upsert_technical_indicators(df)
-
-                        # 트레이딩 시그널 추출 및 삽입 (A1Sheet에 포함되어 있음)
-                        signals_df = pd.DataFrame()
-                        
-                        if 'Buy_Signal' in df.columns:
-                            buy_idx = df['Buy_Signal'] == 1
-                            if buy_idx.any():
-                                b_df = df[buy_idx].copy()
-                                b_df['signal_type'] = 'BUY'
-                                b_df['description'] = 'MACD, RSI 상승장 다이버전스/골든크로스 매수 신호'
-                                b_df['signal_strength'] = 1.0
-                                signals_df = pd.concat([signals_df, b_df])
-
-                        if 'Sell_Signal' in df.columns:
-                            sell_idx = df['Sell_Signal'] == 1
-                            if sell_idx.any():
-                                s_df = df[sell_idx].copy()
-                                s_df['signal_type'] = 'SELL'
-                                s_df['description'] = 'MACD, RSI 과매도 데드크로스 매도 신호'
-                                s_df['signal_strength'] = 1.0
-                                signals_df = pd.concat([signals_df, s_df])
-                                
-                        if not signals_df.empty:
-                            db.upsert_trading_signals(signals_df)
-
-    def _upsert_b1(self, market, now, start_date_5d):
-        print(f"[*] B1Sheet DB 적재 시작: {market}")
-        import os
-        start_dt = now - timedelta(days=5)
-        for i in range(6):
-            date_str = (start_dt + timedelta(days=i)).strftime('%Y-%m-%d')
-            b1_path = f"{self.base_path}/{market}/B1Sheet/{date_str}"
-            if os.path.exists(b1_path):
-                for file in os.listdir(b1_path):
-                    if file.endswith('.parquet') or file.endswith('.csv'):
-                        df = self._safe_read_file(os.path.join(b1_path, file))
-                        if not df.empty:
-                            db.upsert_trading_signals(df)
-
-    def _upsert_m1(self, market, target_date):
-        print(f"[*] M1Sheet DB 적재 시작: {market}")
-        import os
-        m1_path = f"{self.base_path}/{market}/M1Sheet/{target_date}"
-        if os.path.exists(m1_path):
-            for file in os.listdir(m1_path):
-                if file.endswith('.parquet') or file.endswith('.csv'):
-                    df = self._safe_read_file(os.path.join(m1_path, file))
-                    if not df.empty:
-                        df['Date'] = target_date
-                        db.upsert_market_cap(df)
-
-    def _upsert_c1(self, market):
-        print(f"[*] C1Sheet DB 적재 시작: {market}")
-        import os
-        c1_path = f"{self.base_path}/{market}/C1Sheet"
-        if os.path.exists(c1_path):
-            for freq in ['1d', '1w', '1m']:
-                target_file_pq = os.path.join(c1_path, f"df_trans_{freq}.parquet")
-                target_file_csv = os.path.join(c1_path, f"df_trans_{freq}.csv")
-                target_file = target_file_pq if os.path.exists(target_file_pq) else target_file_csv
-                if os.path.exists(target_file):
-                    df = self._safe_read_file(target_file)
-                    if not df.empty:
-                        # trans_df: index = Symbol (column 0 in CSV).
-                        if 'Symbol' not in df.columns:
-                            df = df.rename(columns={df.columns[0]: 'Symbol'})
-                        df_melt = df.melt(id_vars=['Symbol'], var_name='Date', value_name='ZScore')
-                        df_melt = df_melt[df_melt['ZScore'].notnull()]
-                        db.upsert_zscore_features(df_melt, freq)
-
-    def _upsert_c2(self, market, target_date):
-        print(f"[*] C2Sheet DB 적재 시작: {market}")
-        import os
-        c2_path = f"{self.base_path}/{market}/C2Sheet/{target_date}"
-        if os.path.exists(c2_path):
-            for method_dir in os.listdir(c2_path):
-                method_path = os.path.join(c2_path, method_dir)
-                if os.path.isdir(method_path):
-                    for file in os.listdir(method_path):
-                        if 'elbow' not in file and file.endswith('.parquet'):
-                            df = pd.read_parquet(os.path.join(method_path, file))
-                            if not df.empty:
-                                df = df.reset_index()
-                                df['Market'] = market
-                                df['TargetDate'] = target_date
-                                if 'symbol' in df.columns:
-                                    df['Symbol'] = df['symbol']
-                                elif 'Symbol' not in df.columns:
-                                    df['Symbol'] = df[df.columns[0]]
-                                    
-                                if 'clusters' in df.columns:
-                                    df['Cluster_ID'] = df['clusters']
-                                elif 'Cluster' in df.columns:
-                                    df['Cluster_ID'] = df['Cluster']
-                                
-                                df['Method'] = method_dir
-                                db.upsert_clustering_results(df)
+    # (모든 개별 프로세스 파일 내부에서 실시간 DB 적재를 수행하도록 변경되어 제거됨)
 
     def run_kr_markets(self):
         """국내 시장(KOSPI, KOSDAQ) 자동 태스크 - 병렬 최적화 구조"""

@@ -231,7 +231,7 @@ class SignalSankeyGenerator:
 # 실제 실행 코드 예시
 # ==========================================
 if __name__ == "__main__":
-    BASE_DIR = r"C:\Users\yslee\PycharmProjects\FinanceMLOps\Data"
+    BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Data")
     START_DATE = "2026-05-01"
     END_DATE = "2026-06-09"
     

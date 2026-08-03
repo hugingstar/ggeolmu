@@ -1,32 +1,45 @@
 # Database Tier: PostgreSQL DBManager (파라미터화 쿼리 및 재시도 연결 관리)
-import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import execute_values
+from contextlib import contextmanager
 import os
+import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
+
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_project_root, ".env"))
 
 class DBManager:
     def __init__(self):
-        # PostgreSQL 접속 정보 (환경 변수 또는 기본값)
+        # PostgreSQL 접속 정보 (환경 변수 필수 - .env 파일 또는 실제 환경 변수로 설정)
         self.host = os.environ.get("DB_HOST", "localhost")
         self.port = os.environ.get("DB_PORT", "5432")
         self.dbname = os.environ.get("DB_NAME", "postgres")
         self.user = os.environ.get("DB_USER", "postgres")
-        self.password = os.environ.get("DB_PASS", "postgres")
-        self.conn = None
-        
+        self.password = os.environ.get("DB_PASS")
+        if not self.password:
+            raise RuntimeError(
+                "DB_PASS 환경변수가 설정되어 있지 않습니다. 프로젝트 루트의 .env 파일에 DB_PASS를 설정하세요 "
+                "(docker-compose.yml의 POSTGRES_PASSWORD와 동일한 값이어야 합니다)."
+            )
+        self.pool_max = int(os.environ.get("DB_POOL_MAX", "10"))
+        self.pool = None
+
         # 쿼리 파일 캐싱 (Database/queries 디렉토리)
         self.queries = {}
         self.query_dir = os.path.join(os.path.dirname(__file__), "queries")
-        
+
         self.connect()
         self._load_all_queries()
 
     def connect(self, retries: int = 3, delay: float = 2.0):
-        """PostgreSQL 데이터베이스 연결을 수행하며 실패 시 재시도합니다."""
+        """PostgreSQL 커넥션 풀을 생성하며 실패 시 재시도합니다."""
         import time
         for i in range(retries):
             try:
-                self.conn = psycopg2.connect(
+                self.pool = pool.ThreadedConnectionPool(
+                    1, self.pool_max,
                     host=self.host,
                     port=self.port,
                     dbname=self.dbname,
@@ -34,13 +47,46 @@ class DBManager:
                     password=self.password,
                     connect_timeout=5
                 )
-                self.conn.autocommit = True
-                print(f"[DBManager] PostgreSQL 데이터베이스 연결 성공 ({self.host}:{self.port}/{self.dbname})")
+                print(f"[DBManager] PostgreSQL 커넥션 풀 생성 성공 ({self.host}:{self.port}/{self.dbname}, max={self.pool_max})")
                 return
             except Exception as e:
                 print(f"[DBManager] DB 연결 시도 {i+1}/{retries} 실패: {e}")
                 if i < retries - 1:
                     time.sleep(delay)
+        self.pool = None
+
+    @contextmanager
+    def _cursor(self):
+        """
+        풀에서 커넥션을 대여해 커서를 제공합니다. with 블록이 정상 종료되면 커밋,
+        예외 발생 시 롤백 후 재발생시키며, 어느 경우든 커넥션을 풀에 반납합니다.
+        """
+        if not self.pool:
+            raise RuntimeError("DB 커넥션 풀이 초기화되지 않았습니다.")
+        conn = self.pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                yield cur
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self.pool.putconn(conn)
+
+    def _invalidate_cache(self, key_prefix: str):
+        """WAS의 Redis Cache-Aside 캐시(app.py의 cache_response)를 파이프라인 갱신 시점에 무효화합니다."""
+        try:
+            import redis
+            redis_host = os.environ.get("REDIS_HOST", "localhost")
+            redis_port = int(os.environ.get("REDIS_PORT", "6379"))
+            client = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
+            keys = list(client.scan_iter(match=f"{key_prefix}*"))
+            if keys:
+                client.delete(*keys)
+                print(f"[DBManager] Redis 캐시 무효화: {key_prefix}* ({len(keys)}건)")
+        except Exception as e:
+            print(f"[DBManager] Redis 캐시 무효화 실패(무시하고 계속): {e}")
 
     def _load_all_queries(self):
         """Database/queries 및 로컬 queries 디렉토리 안의 모든 sql 스크립트를 통합 로드합니다."""
@@ -70,13 +116,13 @@ class DBManager:
 
     def initialize_tables(self):
         """기본적인 종목 데이터, 프롬프트 결과 및 파이프라인 로그 저장용 테이블 생성"""
-        if not self.conn:
+        if not self.pool:
             return
         
         create_query = self.get_query("001_create_tables.sql")
         if create_query:
             try:
-                with self.conn.cursor() as cur:
+                with self._cursor() as cur:
                     cur.execute(create_query)
                     idx_query = self.get_query("011_create_stock_indexes.sql")
                     if idx_query:
@@ -90,7 +136,7 @@ class DBManager:
         log_create_query = self.get_query("015_create_pipeline_logs.sql")
         if log_create_query:
             try:
-                with self.conn.cursor() as cur:
+                with self._cursor() as cur:
                     cur.execute(log_create_query)
             except Exception as e:
                 print(f"[DBManager] Table creation failed (015): {e}")
@@ -112,7 +158,7 @@ class DBManager:
                 error_message = EXCLUDED.error_message;
             """
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(query, (execution_id, market, start_time, end_time, duration_seconds, status, step_details, error_message))
         except Exception as e:
             print(f"[DBManager] Error upserting pipeline execution log: {e}")
@@ -121,7 +167,7 @@ class DBManager:
         """
         get_fdr 등에서 가져온 pandas DataFrame을 테이블에 삽입 (UPSERT)
         """
-        if not self.conn or df.empty:
+        if not self.pool or df.empty:
             return
 
         insert_query = self.get_query("002_insert_raw_data.sql")
@@ -138,9 +184,10 @@ class DBManager:
         records = [tuple(x) for x in df_clean[cols].to_numpy()]
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 execute_values(cur, insert_query, records, page_size=1000)
                 print(f"[DBManager] {len(records)} 건 데이터 갱신/삽입 완료.")
+            self._invalidate_cache("system_stats")
         except Exception as e:
             print(f"[DBManager] Bulk Insert 실패: {e}")
 
@@ -148,13 +195,13 @@ class DBManager:
         """
         직접 쿼리 문자열을 전달받거나, 쿼리 파일 이름을 전달받아 실행
         """
-        if not self.conn:
+        if not self.pool:
             return []
         
         query = self.queries.get(query_name_or_str, query_name_or_str)
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(query, params)
                 return cur.fetchall()
         except Exception as e:
@@ -165,13 +212,13 @@ class DBManager:
         """
         INSERT, UPDATE, DELETE 등 결과 반환이 없는 쓰기 쿼리를 실행합니다.
         """
-        if not self.conn:
+        if not self.pool:
             return False
         
         query = self.queries.get(query_name_or_str, query_name_or_str)
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(query, params)
                 return True
         except Exception as e:
@@ -182,7 +229,7 @@ class DBManager:
         """
         주어진 쿼리나 이름을 실행하고 결과를 pandas DataFrame으로 반환합니다.
         """
-        if not self.conn:
+        if not self.pool:
             return pd.DataFrame()
             
         if query_name_or_str == "select_market_cap":
@@ -193,7 +240,7 @@ class DBManager:
             query = self.queries.get(query_name_or_str, query_name_or_str)
             
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(query, params)
                 if cur.description:
                     columns = [desc[0] for desc in cur.description]
@@ -205,7 +252,7 @@ class DBManager:
             return pd.DataFrame()
 
     def upsert_market_cap(self, df: pd.DataFrame):
-        if not self.conn or df.empty:
+        if not self.pool or df.empty:
             return
             
         df_clean = df.where(pd.notnull(df), None)
@@ -225,14 +272,14 @@ class DBManager:
             market_cap_krw = EXCLUDED.market_cap_krw
         """
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 execute_values(cur, query, records, page_size=1000)
                 print(f"[DBManager] 시가총액 {len(records)} 레코드 Upsert 성공.")
         except Exception as e:
             print(f"[DBManager] upsert_market_cap 실패: {e}")
 
     def upsert_zscore_features(self, df: pd.DataFrame, freq: str):
-        if not self.conn or df.empty:
+        if not self.pool or df.empty:
             return
             
         df_clean = df.where(pd.notnull(df), None)
@@ -256,14 +303,14 @@ class DBManager:
             zscore = EXCLUDED.zscore;
         """)
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 execute_values(cur, query, records, page_size=1000)
                 print(f"[DBManager] ZScore 지표 {len(records)} 레코드 ({freq}) Upsert 성공.")
         except Exception as e:
             print(f"[DBManager] upsert_zscore_features 실패: {e}")
 
     def upsert_clustering_results(self, df: pd.DataFrame):
-        if not self.conn or df.empty:
+        if not self.pool or df.empty:
             return
             
         df_clean = df.where(pd.notnull(df), None)
@@ -290,14 +337,15 @@ class DBManager:
             cluster_id = EXCLUDED.cluster_id;
         """)
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 execute_values(cur, query, records, page_size=1000)
                 print(f"[DBManager] 클러스터링 결과 {len(records)} 레코드 Upsert 성공.")
+            self._invalidate_cache("clustering_data")
         except Exception as e:
             print(f"[DBManager] upsert_clustering_results 실패: {e}")
 
     def upsert_technical_indicators(self, df: pd.DataFrame):
-        if not self.conn or df.empty:
+        if not self.pool or df.empty:
             return
         records = []
         col_mappings = [
@@ -482,7 +530,7 @@ class DBManager:
         ON CONFLICT (date, symbol) DO UPDATE SET
         """ + ", ".join([f"{c} = EXCLUDED.{c}" for c in cols_sql.split(", ") if c not in ["date", "symbol"]]) + ", created_at = CURRENT_TIMESTAMP;")
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 from psycopg2.extras import execute_values
                 execute_values(cur, query, records, page_size=1000)
                 print(f"[DBManager] 기술분석 지표 {len(records)} 레코드 Upsert 성공.")
@@ -490,7 +538,7 @@ class DBManager:
             print(f"[DBManager] upsert_technical_indicators 실패: {e}")
 
     def upsert_trading_signals(self, df: pd.DataFrame):
-        if not self.conn or df.empty:
+        if not self.pool or df.empty:
             return
         df_clean = df.where(pd.notnull(df), None)
         records = []
@@ -516,7 +564,7 @@ class DBManager:
             name = EXCLUDED.name, market = EXCLUDED.market, signal_strength = EXCLUDED.signal_strength, description = EXCLUDED.description;
         """)
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 execute_values(cur, query, records, page_size=1000)
                 print(f"[DBManager] 트레이딩 시그널 {len(records)} 레코드 Upsert 성공.")
         except Exception as e:

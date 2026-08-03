@@ -19,8 +19,8 @@
 ─────────────────────────────────────────────────────────────────
 
 처리 흐름 (클래스별 역할)
-  SignalConfig   : 신호 파일명 → (A1Sheet 컬럼명, 발생 조건) 매핑 + 컬럼 이름 생성
-  A1SheetLoader  : A1Sheet 종목 파일 로드·캐시, 발생 행 위치 탐색
+  SignalConfig   : 신호 파일명 → (지표 컬럼명, 발생 조건) 매핑 + 컬럼 이름 생성
+  DBLoader       : DB에서 종목 파일 로드·캐시, 발생 행 위치 탐색
   B1SheetReader  : B1Sheet 날짜폴더 탐색, 종목 universe 수집
   B3SheetWriter  : B3Sheet 폴더 생성, CSV + Parquet 저장
   SignalAnalyzer : 날짜폴더별 루프, 윈도우 계산, 결과 조립 (메인 오케스트레이터)
@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────
 # CONFIG
 # ──────────────────────────────────────────────────────────────────
-BASE_DIR: str = r"C:\Users\yslee\PycharmProjects\FinanceMLOps\Data"
+BASE_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Data")
 M: int = 5                      # 신호발생일 이전 거래일 수
 N: int = 5                      # 신호발생일 이후 거래일 수
 MARKETS: Optional[List[str]] = None   # None → B1Sheet 있는 모든 market 자동 탐색
@@ -66,7 +66,7 @@ DATE_COL_CANDIDATES: List[str] = [
     "Date", "date", "DATE", "Datetime", "datetime", "기준일"
 ]
 
-# B1Sheet 신호 파일명(정규화 stem) → (A1Sheet 컬럼명, 발생 조건)
+# B1Sheet 신호 파일명(정규화 stem) → (지표 컬럼명, 발생 조건)
 #   "gt0" : 컬럼값 > 0 이면 신호 발생
 #   "lt0" : 컬럼값 < 0 이면 신호 발생 (과매도)
 #   RSI_Signal_Sum / CCI_Signal_Sum 은 같은 컬럼을 공유하지만
@@ -90,7 +90,7 @@ SIGNAL_DEFS: Dict[str, Tuple[str, str]] = {
 # SignalConfig : 신호 파일명 매핑 + 출력 컬럼 이름 생성
 # ──────────────────────────────────────────────────────────────────
 class SignalConfig:
-    """신호 파일명 ↔ (A1Sheet 컬럼, 발생 조건) 매핑과 출력 컬럼 이름을 담당한다."""
+    """신호 파일명 ↔ (지표 컬럼, 발생 조건) 매핑과 출력 컬럼 이름을 담당한다."""
 
     def __init__(
         self,
@@ -150,86 +150,77 @@ class SignalConfig:
 
 
 # ──────────────────────────────────────────────────────────────────
-# A1SheetLoader : 종목 파일 로드·캐시, 발생 위치 탐색
+# DBLoader : 데이터베이스에서 종목별 기술적 지표 로드 및 캐시
 # ──────────────────────────────────────────────────────────────────
-class A1SheetLoader:
-    """A1Sheet 폴더의 종목별 parquet 파일을 읽고 메모리에 캐시한다."""
+class DBLoader:
+    """PostgreSQL 데이터베이스의 technical_indicators 테이블에서 데이터를 읽고 캐시한다."""
 
-    def __init__(self, a1_root: str) -> None:
-        self.a1_root = a1_root
+    def __init__(self, market: str) -> None:
+        from Database.db_manager import DBManager
+        self.db = DBManager()
+        self.market = market
         self._cache: Dict[str, Optional[Tuple[pd.DataFrame, str]]] = {}
 
-    # ── 파일 경로 ────────────────────────────────────────────────────
-    def file_path(self, name: str, symbol: str) -> str:
-        return os.path.join(self.a1_root, f"{name}({symbol}).parquet")
-
-    # ── 로드 (캐시 적중 시 재사용) ───────────────────────────────────
     def load(self, name: str, symbol: str) -> Optional[Tuple[pd.DataFrame, str]]:
-        """
-        (df, date_col) 반환. 파일 없거나 오류 시 None.
-        같은 종목은 두 번 읽지 않는다.
-        """
         key = f"{name}({symbol})"
         if key in self._cache:
             return self._cache[key]
 
-        path = self.file_path(name, symbol)
         result = None
-
-        if not os.path.exists(path):
-            log.debug("A1Sheet 파일 없음: %s", path)
-        else:
-            try:
-                df = pd.read_parquet(path)
-                if df.empty:
-                    log.warning("A1Sheet 빈 파일: %s", path)
-                else:
-                    df, date_col = self._normalize(df, path)
-                    result = (df, date_col)
-            except Exception as exc:
-                log.warning("A1Sheet 읽기 실패 [%s]: %s", path, exc)
+        try:
+            query = "SELECT * FROM public.technical_indicators WHERE symbol = %s ORDER BY date"
+            df = self.db.read_query(query, (symbol,))
+            
+            if df.empty:
+                log.debug("DB에 데이터 없음: %s", key)
+            else:
+                df, date_col = self._normalize(df, key)
+                result = (df, date_col)
+        except Exception as exc:
+            log.warning("DB 읽기 실패 [%s]: %s", key, exc)
 
         self._cache[key] = result
         return result
 
-    # ── 내부: 날짜 정규화 & 정렬 ────────────────────────────────────
     @staticmethod
-    def _normalize(df: pd.DataFrame, path: str) -> Tuple[pd.DataFrame, str]:
+    def _normalize(df: pd.DataFrame, key: str) -> Tuple[pd.DataFrame, str]:
         date_col: Optional[str] = None
 
-        # DatetimeIndex → 컬럼으로
-        if isinstance(df.index, pd.DatetimeIndex):
-            df = df.reset_index()
-            date_col = df.columns[0]
+        if 'date' in df.columns:
+            date_col = 'date'
+        elif 'Date' in df.columns:
+            date_col = 'Date'
 
-        # 후보 컬럼 탐색
         if date_col is None:
             for c in DATE_COL_CANDIDATES:
                 if c in df.columns:
                     date_col = c
                     break
 
-        # 최후 수단: 첫 번째 컬럼
         if date_col is None:
             date_col = df.columns[0]
-            log.warning("날짜 컬럼 추정(첫 컬럼=%s): %s", date_col, path)
+            log.warning("날짜 컬럼 추정(첫 컬럼=%s): %s", date_col, key)
 
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
         before = len(df)
         df = df.dropna(subset=[date_col]).sort_values(date_col).reset_index(drop=True)
         dropped = before - len(df)
         if dropped:
-            log.warning("날짜 파싱 실패 %d행 제거: %s", dropped, path)
+            log.warning("날짜 파싱 실패 %d행 제거: %s", dropped, key)
+
+        # DB에서 소문자로 반환되는 핵심 컬럼을 대문자 포맷으로 보정
+        lower_to_target = {'close': 'Close', 'name': 'Name', 'symbol': 'Symbol'}
+        rename_dict = {}
+        for c in df.columns:
+            if c.lower() in lower_to_target and c != lower_to_target[c.lower()]:
+                rename_dict[c] = lower_to_target[c.lower()]
+        if rename_dict:
+            df.rename(columns=rename_dict, inplace=True)
 
         return df, date_col
 
-    # ── 신호 발생 위치 탐색 ──────────────────────────────────────────
     @staticmethod
     def find_occurrences(series: pd.Series, cond: str) -> np.ndarray:
-        """
-        발생 조건을 만족하는 행 위치(0-based int array) 반환.
-        NaN → False 처리. cond = 'gt0' | 'lt0'.
-        """
         vals = pd.to_numeric(series, errors="coerce").to_numpy(dtype="float64")
         if cond == "gt0":
             return np.flatnonzero(vals > 0)
@@ -237,16 +228,13 @@ class A1SheetLoader:
             return np.flatnonzero(vals < 0)
         raise ValueError(f"알 수 없는 발생 조건: {cond!r}  (gt0 또는 lt0 만 허용)")
 
-    # ── 컬럼 탐색 (대소문자 무시) ────────────────────────────────────
     @staticmethod
     def resolve_col(df: pd.DataFrame, col_name: str) -> Optional[str]:
-        """정확 일치 우선, 없으면 대소문자 무시 매칭. 없으면 None."""
         if col_name in df.columns:
             return col_name
         lower_map = {c.lower(): c for c in df.columns}
         return lower_map.get(col_name.lower())
 
-    # ── 캐시 초기화 ──────────────────────────────────────────────────
     def clear_cache(self) -> None:
         self._cache.clear()
 
@@ -385,7 +373,7 @@ class SignalAnalyzer:
     ┌ 날짜폴더 루프 ─────────────────────────────────────────────┐
     │  ┌ 신호 파일 루프 ─────────────────────────────────────┐   │
     │  │  B1Sheet에서 그 날 종목 universe 읽기               │   │
-    │  │  A1Sheet에서 역대 신호 발생일 전부 탐색             │   │
+    │  │  DB에서 역대 신호 발생일 전부 탐색                  │   │
     │  │  [-M, +N] 윈도우 Close + 변동률 계산               │   │
     │  │  B3Sheet/{날짜폴더}/{신호}.parquet + .csv 저장      │   │
     │  └─────────────────────────────────────────────────────┘   │
@@ -404,11 +392,10 @@ class SignalAnalyzer:
         self.n = n
 
         self.b1_root = os.path.join(base_dir, market, "B1Sheet")
-        self.a1_root = os.path.join(base_dir, market, "A1Sheet")
         self.b3_root = os.path.join(base_dir, market, "B3Sheet")
 
         self.config   = SignalConfig(SIGNAL_DEFS, m, n)
-        self.a1loader = A1SheetLoader(self.a1_root)
+        self.a1loader = DBLoader(market)
         self.b1reader = B1SheetReader(self.b1_root)
         self.b3writer = B3SheetWriter(self.b3_root)
 
@@ -508,7 +495,7 @@ class SignalAnalyzer:
         # ④ 통계 로그 (건수가 있을 때만)
         if any(stats.values()):
             log.debug(
-                "[%s][%s] A1Sheet누락=%d, Close없음=%d, 컬럼없음=%d, 이벤트0=%d",
+                "[%s][%s] DB조회실패=%d, Close없음=%d, 컬럼없음=%d, 이벤트0=%d",
                 date_info.date_str, signal_file,
                 stats["missing_file"], stats["no_close"],
                 stats["no_col"], stats["no_event"],
@@ -525,9 +512,6 @@ class SignalAnalyzer:
     def run(self) -> None:
         if not os.path.isdir(self.b1_root):
             log.error("B1Sheet 폴더 없음: %s", self.b1_root)
-            return
-        if not os.path.isdir(self.a1_root):
-            log.error("A1Sheet 폴더 없음: %s", self.a1_root)
             return
 
         date_folders = self.b1reader.iter_date_folders()

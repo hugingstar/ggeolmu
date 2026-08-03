@@ -13,10 +13,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const newsListBox = document.getElementById('news-list-box');
   const quickTags = document.querySelectorAll('.tag-btn');
   const periodBtns = document.querySelectorAll('.period-btn');
+  const customDaysInput = document.getElementById('custom-days-input');
+  const customDaysBtn = document.getElementById('custom-days-btn');
 
   let autocompleteTimeout = null;
   let currentSymbol = '005930';
-  let currentDays = 30;
+  let currentDays = 180;
+  let searchAbortController = null;
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   function formatNumber(num) {
     if (num === null || num === undefined) return '-';
@@ -137,11 +150,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         newsListBox.innerHTML = news.map(item => `
-          <a href="${item.link}" target="_blank" rel="noopener noreferrer" class="news-card">
-            <div class="news-title">${item.title}</div>
+          <a href="${escapeHtml(item.link)}" target="_blank" rel="noopener noreferrer" class="news-card">
+            <div class="news-title">${escapeHtml(item.title)}</div>
             <div class="news-meta">
-              <span class="news-source">📰 ${item.source}</span>
-              <span class="news-date">${item.pubDate}</span>
+              <span class="news-source">📰 ${escapeHtml(item.source)}</span>
+              <span class="news-date">${escapeHtml(item.pubDate)}</span>
             </div>
           </a>
         `).join('');
@@ -158,17 +171,22 @@ document.addEventListener('DOMContentLoaded', () => {
   async function executeSearch(symbolOrName, days = currentDays) {
     if (!symbolOrName) return;
 
+    // 연속 검색 시 이전 요청을 취소해 응답 순서 역전(늦게 도착한 이전 요청이 최신 결과를 덮어쓰는 현상)을 방지
+    if (searchAbortController) searchAbortController.abort();
+    const abortController = new AbortController();
+    searchAbortController = abortController;
+
     currentDays = days;
     chartArea.innerHTML = '<div class="loader">PostgreSQL DB 주가 이력 및 매수/매도 시그널 연산 중...</div>';
-    stockTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">데이터베이스 조회 중...</td></tr>';
+    stockTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">데이터베이스 조회 중...</td></tr>';
     promptOutput.value = '4-Tier Multi-Agent 프롬프트 생성 중...';
 
     let resolvedSymbol = symbolOrName.trim().toUpperCase();
 
     try {
       const [detailRes, promptRes] = await Promise.all([
-        fetch(`/api/stock/${encodeURIComponent(resolvedSymbol)}?days=${days}`),
-        fetch(`/api/prompt?symbol=${encodeURIComponent(resolvedSymbol)}`)
+        fetch(`/api/stock/${encodeURIComponent(resolvedSymbol)}?days=${days}`, { signal: abortController.signal }),
+        fetch(`/api/prompt?symbol=${encodeURIComponent(resolvedSymbol)}`, { signal: abortController.signal })
       ]);
 
       let detailData = null;
@@ -177,7 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (detailRes.ok) detailData = await detailRes.json();
       if (promptRes.ok) promptData = await promptRes.json();
 
-      if (detailData) {
+      if (detailData && Array.isArray(detailData.history)) {
         currentSymbol = detailData.symbol;
         stockTitle.innerText = `${detailData.name} (${detailData.symbol})`;
         stockBadges.innerHTML = ``;
@@ -189,9 +207,13 @@ document.addEventListener('DOMContentLoaded', () => {
           if (h.signal === 'BUY') sigBadge = '<span class="sig-tag sig-buy">🟢 매수</span>';
           if (h.signal === 'SELL') sigBadge = '<span class="sig-tag sig-sell">🔴 매도</span>';
 
+          const dateObj = new Date(h.date);
+          const dayOfWeek = dateObj.toLocaleDateString('ko-KR', { weekday: 'short' });
+
           return `
             <tr>
               <td>${h.date}</td>
+              <td class="text-muted" style="font-size: 0.85rem;">${dayOfWeek}</td>
               <td>${formatNumber(h.close)}</td>
               <td class="${h.change > 0 ? 'text-green' : h.change < 0 ? 'text-red' : ''}">${formatChange(h.change)}</td>
               <td>${formatNumber(h.volume)}</td>
@@ -205,7 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         stockTitle.innerText = `검색 결과: ${resolvedSymbol}`;
         chartArea.innerHTML = `<div class="error-panel">종목 정보를 찾을 수 없습니다. (종목 코드/이름을 확인하세요)</div>`;
-        stockTbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">데이터가 없습니다.</td></tr>`;
+        stockTbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">데이터가 없습니다.</td></tr>`;
         loadNewsFeed(resolvedSymbol);
       }
 
@@ -216,8 +238,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
     } catch (e) {
+      if (e.name === 'AbortError') return; // 더 최신 검색 요청으로 대체되어 취소된 정상적인 상황
       console.error('Search error', e);
-      chartArea.innerHTML = `<div class="error-panel">시스템 오류가 발생했습니다: ${e.message}</div>`;
+      chartArea.innerHTML = `<div class="error-panel">시스템 오류가 발생했습니다: ${escapeHtml(e.message)}</div>`;
     }
   }
 
@@ -232,6 +255,21 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Event Listeners
+  if (customDaysBtn && customDaysInput) {
+    customDaysBtn.addEventListener('click', () => {
+      const days = parseInt(customDaysInput.value, 10);
+      if (days && days > 0) {
+        periodBtns.forEach(b => b.classList.remove('active'));
+        executeSearch(currentSymbol, days);
+      }
+    });
+    customDaysInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        customDaysBtn.click();
+      }
+    });
+  }
+
   if (searchBtn) {
     searchBtn.addEventListener('click', () => {
       executeSearch(symbolInput.value, currentDays);
@@ -261,9 +299,9 @@ document.addEventListener('DOMContentLoaded', () => {
               return;
             }
             autocompleteBox.innerHTML = list.map(item => `
-              <div class="autocomplete-item" data-symbol="${item.symbol}">
-                <span class="ac-name">${item.name}</span>
-                <span class="ac-symbol">${item.symbol}</span>
+              <div class="autocomplete-item" data-symbol="${escapeHtml(item.symbol)}">
+                <span class="ac-name">${escapeHtml(item.name)}</span>
+                <span class="ac-symbol">${escapeHtml(item.symbol)}</span>
               </div>
             `).join('');
             autocompleteBox.classList.remove('hidden');
@@ -283,6 +321,13 @@ document.addEventListener('DOMContentLoaded', () => {
         symbolInput.value = sym;
         autocompleteBox.classList.add('hidden');
         executeSearch(sym, currentDays);
+      }
+    });
+
+    // 외부 영역 클릭 시 자동완성 닫기
+    document.addEventListener('click', (e) => {
+      if (!autocompleteBox.contains(e.target) && e.target !== symbolInput) {
+        autocompleteBox.classList.add('hidden');
       }
     });
   }

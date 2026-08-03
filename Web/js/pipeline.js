@@ -22,7 +22,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function fetchPipelineLogs() {
         try {
-            const res = await fetch("/api/pipeline/logs?limit=50");
+            const res = await fetch("/api/pipeline/logs?limit=50", {
+                headers: { "X-API-Key": window.__WAS_API_KEY__ || "" }
+            });
             const data = await res.json();
             
             if (data.status === "success" && data.logs) {
@@ -118,7 +120,32 @@ document.addEventListener("DOMContentLoaded", () => {
         btnRefresh.addEventListener("click", fetchPipelineLogs);
     }
 
-    // 초기 로딩 및 5초 주기 자동 갱신
+    // 초기 로딩 및 5초 주기 자동 갱신 (탭이 백그라운드에 있을 때는 폴링을 멈춰 불필요한 요청을 줄임)
+    let pollTimer = null;
+
+    function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(fetchPipelineLogs, 5000);
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            stopPolling();
+        } else {
+            fetchPipelineLogs();
+            startPolling();
+        }
+    });
+
+    window.addEventListener("beforeunload", stopPolling);
+
     fetchPipelineLogs();
-    setInterval(fetchPipelineLogs, 5000);
+    startPolling();
 });

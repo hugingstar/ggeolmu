@@ -245,11 +245,11 @@ class USFinanceDataCrawler:
 
 
 if __name__ == "__main__":
-    SAVE_BASE_PATH = r"C:\Users\yslee\PycharmProjects\FinanceMLOps\Data"
+    SAVE_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Data")
     TARGET_DATE = datetime.now().strftime("%Y-%m-%d")
-    
-    # crawler = USFinanceDataCrawler(base_path=SAVE_BASE_PATH, target_date=TARGET_DATE)
-    
+
+    crawler = USFinanceDataCrawler(base_path=SAVE_BASE_PATH, target_date=TARGET_DATE)
+
     # 재무재표 크롤링
     MARKET_LIST = ["NASDAQ", "NYSE"]
     for market in MARKET_LIST:

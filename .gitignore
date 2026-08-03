@@ -8,3 +8,5 @@ Data/KOSPI/
 Data/NASDAQ/
 Data/NYSE/
 .env
+*.log
+.pytest_cache/

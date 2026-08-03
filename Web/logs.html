@@ -112,9 +112,19 @@
       let allLogs = [];
       let filteredLogs = [];
 
+      function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
       // 로그 데이터 로딩
       try {
-        const res = await fetch('/api/logs?limit=200');
+        const res = await fetch('/api/logs?limit=200', { headers: { 'X-API-Key': window.__WAS_API_KEY__ || '' } });
         if (!res.ok) return;
         allLogs = await res.json();
       } catch (e) {
@@ -149,13 +159,13 @@
           tbody.innerHTML = pageData.map(l => {
             const badgeClass = l.status === 'PASS' ? 'badge-success' : 'badge-danger';
             const badgeIcon = l.status === 'PASS' ? '🟢' : '🔴';
-            const promptData = l.generated_prompt ? l.generated_prompt.replace(/"/g, '&quot;') : '';
+            const promptData = escapeHtml(l.generated_prompt || '');
             return `
               <tr>
-                <td style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-muted);">${l.id}</td>
-                <td><a href="/?symbol=${l.symbol}" class="log-symbol-link">${l.symbol}</a></td>
-                <td><span class="badge ${badgeClass}">${badgeIcon} ${l.status}</span></td>
-                <td>${l.created_at ? l.created_at.substring(0, 19).replace('T', ' ') : '-'}</td>
+                <td style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-muted);">${escapeHtml(l.id)}</td>
+                <td><a href="/?symbol=${encodeURIComponent(l.symbol)}" class="log-symbol-link">${escapeHtml(l.symbol)}</a></td>
+                <td><span class="badge ${badgeClass}">${badgeIcon} ${escapeHtml(l.status)}</span></td>
+                <td>${l.created_at ? escapeHtml(l.created_at.substring(0, 19).replace('T', ' ')) : '-'}</td>
                 <td><button class="secondary-btn-sm view-prompt-btn" data-prompt="${promptData}">프롬프트 보기</button></td>
               </tr>
             `;

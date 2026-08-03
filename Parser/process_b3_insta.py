@@ -44,7 +44,7 @@ class Config:
     ACCESS_TOKEN = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "YOUR_ACCESS_TOKEN")
 
     # 파일 경로 설정
-    BASE_DIR = Path(r"C:\Users\yslee\PycharmProjects\FinanceMLOps\Data")
+    BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "Data"
     MARKETS = ["KOSPI", "KOSDAQ", "NASDAQ", "NYSE"]
     SUB_DIR = "B2Sheet"
     FILE_NAME = "sanky.webp"

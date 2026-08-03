@@ -66,8 +66,8 @@ class DaskFinanceProcessor:
         self.market_name = config.get("market_name")
         self.input_file = "raw_data.parquet"
         
-        # ===== [수정] CSV 저장 디렉터리 설정 =====
-        self.save_dir_csv = os.path.join(self.output_path, self.market_name, "A1Sheet")
+        # ===== A1Sheet 파일 저장 삭제 =====
+        # 데이터는 이제 연산 직후 바로 DB로 적재됩니다.
 
         # ===== 클러스터 / 파티션 설정 =====
         self.cluster_config = CLUSTER_CONFIG
@@ -556,13 +556,14 @@ class DaskFinanceProcessor:
                 return None
 
             processed_df = self.calculate_indicators(df_sorted)
-            safe_name = self._sanitize_filename(name)
-            
-            filename_parquet = f"{safe_name}({symbol}).parquet"
-            filepath_parquet = os.path.join(self.save_dir_csv, filename_parquet)
-            processed_df.to_parquet(filepath_parquet, index=False, engine='pyarrow')
-            
-            return symbol
+            if 'Name' not in processed_df.columns:
+                processed_df['Name'] = name
+            if 'Symbol' not in processed_df.columns:
+                processed_df['Symbol'] = symbol
+            if 'Market' not in processed_df.columns:
+                processed_df['Market'] = self.market_name
+                
+            return processed_df
         except Exception as e:
             return None
 
@@ -570,7 +571,9 @@ class DaskFinanceProcessor:
     # 실행
     # ------------------------------------------------------------------
     def run(self):
-        os.makedirs(self.save_dir_csv, exist_ok=True)
+        from Database.db_manager import DBManager
+        db = DBManager()
+        
         input_full_path = os.path.join(self.input_path, self.market_name, self.input_file)
 
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Pandas + Multiprocessing 시스템 가동 (Dask 셔플링 제거)...")
@@ -594,14 +597,39 @@ class DaskFinanceProcessor:
             completed = 0
             total = len(futures)
             for future in concurrent.futures.as_completed(futures):
-                res = future.result()
-                if res:
-                    results.append(res)
+                res_df = future.result()
+                if res_df is not None and not res_df.empty:
+                    # 1. 기술적 지표 DB 적재
+                    db.upsert_technical_indicators(res_df)
+                    
+                    # 2. 트레이딩 시그널 추출 및 DB 적재
+                    signals_df = pd.DataFrame()
+                    if 'Buy_Signal' in res_df.columns:
+                        buy_idx = res_df['Buy_Signal'] == 1
+                        if buy_idx.any():
+                            b_df = res_df[buy_idx].copy()
+                            b_df['signal_type'] = 'BUY'
+                            b_df['description'] = 'MACD, RSI 상승장 다이버전스/골든크로스 매수 신호'
+                            b_df['signal_strength'] = 1.0
+                            signals_df = pd.concat([signals_df, b_df])
+
+                    if 'Sell_Signal' in res_df.columns:
+                        sell_idx = res_df['Sell_Signal'] == 1
+                        if sell_idx.any():
+                            s_df = res_df[sell_idx].copy()
+                            s_df['signal_type'] = 'SELL'
+                            s_df['description'] = 'MACD, RSI 과매도 데드크로스 매도 신호'
+                            s_df['signal_strength'] = 1.0
+                            signals_df = pd.concat([signals_df, s_df])
+                            
+                    if not signals_df.empty:
+                        db.upsert_trading_signals(signals_df)
+
                 completed += 1
                 if completed % 100 == 0 or completed == total:
-                    print(f"진행 상황: {completed}/{total} 완료")
+                    print(f"진행 상황: {completed}/{total} 완료 (DB 실시간 적재 중)")
 
-        print(f"\n--- 작업 완료: 총 {len(results)}개 종목 처리됨 (Parquet 저장 완료) ---")
+        print(f"\n--- 작업 완료: 총 {completed}개 종목 처리됨 (DB 적재 완료) ---")
 
 
 if __name__ == "__main__":

@@ -15,3 +15,7 @@ tslearn
 matplotlib
 fastapi
 uvicorn
+redis
+python-dotenv
+pytest
+httpx

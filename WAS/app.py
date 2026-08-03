@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 import sys
 import os
@@ -9,12 +9,15 @@ import re
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from dotenv import load_dotenv
 
 # 프로젝트 루트 디렉토리를 Python Path에 등록
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 sys.path.append(os.path.join(project_root, "Database"))
 sys.path.append(os.path.join(project_root, "Manager"))
+
+load_dotenv(os.path.join(project_root, ".env"))
 
 from db_manager import DBManager
 from agents.audit_agent import AuditAgent
@@ -72,13 +75,22 @@ def cache_response(key_prefix: str, ttl: int = 60):
         return wrapper
     return decorator
 
+_cors_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 내부 운영 엔드포인트(/api/logs, /api/security/report, /api/pipeline/logs) 보호용 API 키.
+# 비워두면(WAS_API_KEY 미설정) 개발 편의를 위해 인증 없이 열어둔다.
+_WAS_API_KEY = os.environ.get("WAS_API_KEY", "").strip()
+
+def require_internal_api_key(x_api_key: str = Header(default=None)):
+    if _WAS_API_KEY and x_api_key != _WAS_API_KEY:
+        raise HTTPException(status_code=401, detail="유효하지 않은 API 키입니다 (X-API-Key 헤더 필요)")
 
 # 4-Tier 인스턴스 초기화
 db = DBManager()
@@ -227,9 +239,10 @@ def get_stock_detail(symbol: str, days: int = Query(30, description="조회 기�
     history.reverse()
 
     # DB에서 실제 트레이딩 시그널 가져오기
+    actual_symbol = records[0][2]
     signal_records = db.read_query_direct(
         "SELECT date, signal_type FROM public.trading_signals WHERE symbol = %s ORDER BY date DESC LIMIT %s;", 
-        (clean_symbol, limit_days * 2) # 여유 있게
+        (actual_symbol, limit_days * 2) # 여유 있게
     )
     signal_dict = {}
     if signal_records:
@@ -357,7 +370,7 @@ def get_query_analytics():
         "top_queried_stocks": top_queried
     }
 
-@app.get("/api/logs")
+@app.get("/api/logs", dependencies=[Depends(require_internal_api_key)])
 def get_audit_logs(limit: int = 50, offset: int = 0):
     query = """
         SELECT id, symbol, generated_prompt, status, created_at 
@@ -406,7 +419,7 @@ def get_system_stats():
         "status": "online"
     }
 
-@app.get("/api/security/report")
+@app.get("/api/security/report", dependencies=[Depends(require_internal_api_key)])
 def get_security_report():
     return security_manager.get_security_summary()
 
@@ -568,11 +581,22 @@ def read_clustering_html():
 def read_analytics_html():
     return FileResponse(os.path.join(web_dir, "analytics.html"))
 
+def _render_html_with_api_key(filename: str) -> HTMLResponse:
+    """
+    내부 운영 페이지(logs/status/pipeline)에 X-API-Key 인증용 키를 주입해 반환합니다.
+    같은 브라우저 세션 내 fetch 호출이 require_internal_api_key 검사를 통과하도록 하기 위함입니다.
+    """
+    with open(os.path.join(web_dir, filename), "r", encoding="utf-8") as f:
+        html = f.read()
+    injected = f'<script>window.__WAS_API_KEY__ = {json.dumps(_WAS_API_KEY)};</script>'
+    html = html.replace("</head>", f"{injected}\n</head>", 1)
+    return HTMLResponse(content=html)
+
 @app.get("/logs")
 def read_logs_html():
-    return FileResponse(os.path.join(web_dir, "logs.html"))
+    return _render_html_with_api_key("logs.html")
 
-@app.get("/api/pipeline/logs")
+@app.get("/api/pipeline/logs", dependencies=[Depends(require_internal_api_key)])
 def get_pipeline_logs(limit: int = Query(50, description="조회 건수")):
     """
     PostgreSQL public.pipeline_execution_logs 테이블에서 최신 파이프라인 실행 로깅 데이터를 서빙합니다.
@@ -607,16 +631,18 @@ def get_pipeline_logs(limit: int = Query(50, description="조회 건수")):
 
 @app.get("/status")
 def read_status_html():
-    return FileResponse(os.path.join(web_dir, "status.html"))
+    return _render_html_with_api_key("status.html")
 
 @app.get("/pipeline")
 def read_pipeline_html():
-    return FileResponse(os.path.join(web_dir, "pipeline.html"))
+    return _render_html_with_api_key("pipeline.html")
 
 @app.get("/{catchall:path}")
 def read_spa_fallback(catchall: str):
-    target = os.path.join(web_dir, catchall)
-    if os.path.exists(target) and os.path.isfile(target):
+    # web_dir 바깥으로 벗어나는 경로 순회(../ 등)를 차단하기 위해 realpath로 정규화 후 검증
+    web_dir_real = os.path.realpath(web_dir)
+    target = os.path.realpath(os.path.join(web_dir, catchall))
+    if target.startswith(web_dir_real + os.sep) and os.path.isfile(target):
         return FileResponse(target)
     return FileResponse(os.path.join(web_dir, "index.html"))
 

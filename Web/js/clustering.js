@@ -8,6 +8,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const summaryText = document.getElementById('cluster-summary-text');
 
   let currentMarket = 'KOSPI';
+  let activeModalCluster = null;
+  let currentModalView = 'grid';
+  let activeClusterData = null;
 
   // Render SVG Elbow Curve Chart for optimal k criterion
   function renderElbowChart(elbowData, optimalK) {
@@ -259,8 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       clustersContainer.innerHTML = data.clusters.map(cluster => {
-        const initialStocks = cluster.stocks.slice(0, 30);
-        const remainingCount = Math.max(0, cluster.stocks.length - 30);
+        const initialStocks = cluster.stocks.slice(0, 10); // 5행(약 10개) 표출 제한
 
         const stockBadges = initialStocks.map(s => `
           <a href="/?symbol=${encodeURIComponent(s.symbol)}" class="stock-badge">
@@ -271,20 +273,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </a>
         `).join('');
-
-        const hiddenBadges = remainingCount > 0 ? cluster.stocks.slice(30).map(s => `
-          <a href="/?symbol=${encodeURIComponent(s.symbol)}" class="stock-badge hidden-badge hidden">
-            <span class="sb-name">${s.name}</span>
-            <div class="sb-meta">
-              <span class="sb-code">${s.symbol}</span>
-              <span class="sb-mkt">${s.market || currentMarket}</span>
-            </div>
-          </a>
-        `).join('') : '';
-
-        const expandBtn = remainingCount > 0
-          ? `<button class="expand-stocks-btn" data-cluster="${cluster.cluster_id}">+ ${remainingCount}개 종목 더보기</button>`
-          : '';
 
         const sparklineSvg = renderClusterSparkline(cluster.trajectory, cluster.color);
         const ratioPct = cluster.ratio_pct !== undefined ? cluster.ratio_pct : 0;
@@ -333,9 +321,7 @@ document.addEventListener('DOMContentLoaded', () => {
               </div>
               <div class="stocks-badge-grid" id="stocks-grid-${cluster.cluster_id}">
                 ${stockBadges}
-                ${hiddenBadges}
               </div>
-              ${expandBtn}
             </div>
           </div>
         `;
@@ -373,18 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cluster) openStockModal(cluster);
       }
 
-      const expandBtn = e.target.closest('.expand-stocks-btn');
-      if (expandBtn) {
-        const cid = expandBtn.getAttribute('data-cluster');
-        const grid = document.getElementById(`stocks-grid-${cid}`);
-        if (grid) {
-          const hiddenBadges = grid.querySelectorAll('.hidden-badge');
-          const isHidden = hiddenBadges[0] ? hiddenBadges[0].classList.contains('hidden') : false;
-
-          hiddenBadges.forEach(b => b.classList.toggle('hidden'));
-          expandBtn.innerText = isHidden ? '접기 ▲' : `+ ${hiddenBadges.length}개 종목 더보기`;
-        }
-      }
+      // 더보기 버튼 클릭 이벤트 리스너(제거됨)
     });
   }
 

@@ -262,16 +262,19 @@ class MarketCapCrawler:
             print(f"❌ 지원하지 않는 시장 이름입니다: {market}")
             return
         
-        # 시장별 디렉터리 경로 동적 생성 및 폴더 생성
-        target_dir = os.path.join(self.base_path, market, "M1Sheet", self.target_date)
-        os.makedirs(target_dir, exist_ok=True)
+        # -------------------------------------------------------------
+        # DB 직행 로직 (로컬 파일 저장 제거)
+        # -------------------------------------------------------------
+        df['Date'] = self.target_date
         
-        csv_filename = os.path.join(target_dir, "df_cap.csv")
-        
-        df.to_csv(csv_filename, index=False, encoding="utf-8-sig")
-        
-        print(f"[{market}] 완료 - {len(df)}개 종목 저장 완료")
-        print(f"📂 저장 경로: {target_dir}")
+        try:
+            from Database.db_manager import DatabaseManager
+            db = DatabaseManager()
+            db.upsert_market_cap(df)
+            print(f"[{market}] DB 적재 완료 - {len(df)}개 종목")
+        except Exception as e:
+            print(f"[ERROR] DB 적재 실패: {e}")
+            
         print(df.head(), "\n")
 
 # 외부 모듈에서 Import하여 사용할 경우를 대비한 래퍼 함수
@@ -285,7 +288,7 @@ def run_process(base_path: str, target_date: str, market: str):
 
 if __name__ == "__main__":
     # 1. 데이터가 저장될 최상위 경로를 설정합니다.
-    SAVE_BASE_PATH = r"C:\Users\yslee\PycharmProjects\FinanceMLOps\Data"
+    SAVE_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Data")
     
     # 2. 저장 기준이 될 날짜를 설정합니다.
     TARGET_DATE = datetime.now().strftime("%Y-%m-%d")

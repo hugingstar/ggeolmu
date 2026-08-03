@@ -3,7 +3,7 @@
 ## 1. 개요
 `Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집·가공하여 **PostgreSQL 데이터베이스에 적재**하고, 이를 멀티 에이전트(Multi-Agent) 기반으로 분석하여 시각화하는 **4-Tier (WEB-WAS-DB-Manager) 주식 분석 웹 서비스**입니다.
 
-macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **`PipelineLifecycleAgent` 및 파이프라인 모니터링 대시보드 (`/pipeline`)**, **검색종목 유연 매핑(Symbol ➡ 종목명)**, **`get_dynamic_cluster_config()` 동적 자원 자동 감지 모듈**, **`Database/queries/` 16개 SQL 다중 자동 로딩**, **`_safe_read_file` 범용 파라미터 파일 호환 로더** 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
+macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **`PipelineLifecycleAgent` 및 파이프라인 모니터링 대시보드 (`/pipeline`)**, **검색종목 유연 매핑(Symbol ➡ 종목명)**, **`get_dynamic_cluster_config()` 동적 자원 자동 감지 모듈**, **`Database/queries/` 16개 SQL 다중 자동 로딩**, **100% DB 다이렉트 통신 (파일 I/O 병목 완벽 제거)** 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
 
 ---
 
@@ -43,13 +43,13 @@ flowchart TD
     end
 
     %% 3단계: 시계열 클러스터링
-    subgraph Step3 ["3단계: 시가총액 & 시계열 클러스터링 (_safe_read_file 적용)"]
+    subgraph Step3 ["3단계: 시가총액 & 시계열 클러스터링 (DB Direct Ingestion)"]
         direction TB
-        ProcessM1["🐍 process_m1_cap.py<br>(시가총액 데이터 가공)"]:::pythonEngine -->|시총 저장| DB_Cap[("💾 DB: market_cap")]:::dbStorage
+        ProcessM1["🐍 process_m1_cap.py<br>(시가총액 데이터 가공)"]:::pythonEngine -->|시총 직행 적재| DB_Cap[("💾 DB: market_cap")]:::dbStorage
         ProcessM1 -->|정규화| ProcessC1["🐍 process_c1.py<br>(1d/1w/1m Z-Score 산출)"]:::pythonEngine
-        ProcessC1 -->|Z_Score 저장| DB_ZScore[("💾 DB: zscore_features")]:::dbStorage
+        ProcessC1 -->|Z_Score 직행 적재| DB_ZScore[("💾 DB: zscore_features")]:::dbStorage
         ProcessC1 -->|SoftDTW 군집화| ProcessC2["🐍 process_c2.py<br>(SoftDTW K-Means 군집화)"]:::pythonEngine
-        ProcessC2 -->|군집 결과 저장| DB_Cluster[("💾 DB: clustering_results")]:::dbStorage
+        ProcessC2 -->|군집 결과 직행 적재| DB_Cluster[("💾 DB: clustering_results")]:::dbStorage
     end
 
     %% 4단계: 4-Tier 웹 서비스 & 멀티 에이전트

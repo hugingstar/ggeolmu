@@ -93,30 +93,20 @@ class PandasProcessor:
         # 기본 계산 결과: Index=Date(시계열), Columns=Name(종목)
         zscore_df = (final_df - mean_series) / std_series
 
-        # 10. 파일 저장 (CSV 로만 저장)
-        # (1) 기본 피벗 데이터 (가격)
-        pivot_file_csv = os.path.join(self.save_dir, f"df_pivot_{freq.lower()}.csv")
-        final_df.to_csv(pivot_file_csv, encoding='utf-8-sig')
+        # 10. DB 직행 (파일 I/O 제거)
+        # trans_df 생성 대신, melt하여 DB 포맷으로 변경
+        df_melt = zscore_df.reset_index().melt(id_vars=['Date'], var_name='Symbol', value_name='ZScore')
+        df_melt = df_melt[df_melt['ZScore'].notnull()]
+        
+        try:
+            # sys.path 수정 후 import 하도록 최상단이나 본문에 db_manager를 연결해야 함.
+            from Database.db_manager import DatabaseManager
+            db = DatabaseManager()
+            db.upsert_zscore_features(df_melt, freq.lower())
+        except Exception as e:
+            print(f"[ERROR] DB Z-Score 적재 실패: {e}")
 
-        # (2) Z-Score 데이터
-        zscore_file_csv = os.path.join(self.save_dir, f"df_zscore_{freq.lower()}.csv")
-        zscore_df.to_csv(zscore_file_csv, encoding='utf-8-sig')
-
-        # (2-1) Z-score 데이터의 Transpose
-        trans_file_csv = os.path.join(self.save_dir, f"df_trans_{freq.lower()}.csv")
-        trans_df = zscore_df.transpose()
-        # (2) Transpose 데이터 (X축: Date, Y축: Name)
-        trans_file_parquet = os.path.join(self.save_dir, f"df_trans_{freq.lower()}.parquet")
-        trans_df.columns = trans_df.columns.astype(str)
-        trans_df.to_parquet(trans_file_parquet)
-
-        # (3) 통계 데이터 (평균, 표준편차)
-        stats_file_parquet = os.path.join(self.save_dir, f"df_stats_{freq.lower()}.parquet")
-        stats_df.to_parquet(stats_file_parquet)
-
-        print(f"--- {freq.upper()} 처리 완료 ---")
-        print(f"Transpose 데이터 (Parquet): {trans_file_parquet}")
-        print(f"통계 데이터 (Parquet): {stats_file_parquet}\n")
+        print(f"--- {freq.upper()} 처리 완료 (DB 전송 완료) ---")
 
         return {"price": final_df, "zscore": zscore_df, "stats": stats_df}
 

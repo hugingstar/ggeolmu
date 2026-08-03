@@ -101,7 +101,7 @@
       try {
         const [sRes, rRes] = await Promise.all([
           fetch('/api/stats'),
-          fetch('/api/security/report')
+          fetch('/api/security/report', { headers: { 'X-API-Key': window.__WAS_API_KEY__ || '' } })
         ]);
 
         if (sRes.ok) {

@@ -32,9 +32,8 @@ class DaskFinanceProcessor:
         self.market_name = config.get("market_name")
         self.input_file = "raw_data.parquet"
         
-        # ===== [수정] CSV 및 Parquet 저장 디렉터리 각각 설정 =====
-        self.save_dir_csv = os.path.join(self.output_path, self.market_name, "A1Sheet")
-        self.save_dir_parquet = os.path.join(self.output_path, self.market_name, "A1Sheet")
+        # ===== A1Sheet 파일 저장 삭제 =====
+        # 데이터는 이제 연산 직후 바로 DB로 적재됩니다.
 
         # ===== 클러스터 / 파티션 설정 =====
         self.cluster_config = CLUSTER_CONFIG
@@ -542,18 +541,40 @@ class DaskFinanceProcessor:
                     print(f"[Skip] {symbol} ({name}): 데이터 길이 부족 ({len(df_sorted)} rows < 26)")
                     continue
 
+                from Database.db_manager import DBManager
+                db = DBManager()
+                
                 processed_df = self.calculate_indicators(df_sorted)
-                safe_name = self._sanitize_filename(name)
+                if 'Name' not in processed_df.columns:
+                    processed_df['Name'] = name
+                if 'Symbol' not in processed_df.columns:
+                    processed_df['Symbol'] = symbol
+                if 'Market' not in processed_df.columns:
+                    processed_df['Market'] = self.market_name
+                    
+                db.upsert_technical_indicators(processed_df)
                 
-                # 1. CSV 파일로 저장
-                filename_csv = f"{safe_name}({symbol}).csv"
-                filepath_csv = os.path.join(self.save_dir_csv, filename_csv)
-                processed_df.to_csv(filepath_csv, index=False, encoding='utf-8-sig')
-                
-                # 2. Parquet 파일로 저장 (기본 pyarrow 엔진 사용)
-                filename_pq = f"{safe_name}({symbol}).parquet"
-                filepath_pq = os.path.join(self.save_dir_parquet, filename_pq)
-                processed_df.to_parquet(filepath_pq, index=False, engine='pyarrow')
+                signals_df = pd.DataFrame()
+                if 'Buy_Signal' in processed_df.columns:
+                    buy_idx = processed_df['Buy_Signal'] == 1
+                    if buy_idx.any():
+                        b_df = processed_df[buy_idx].copy()
+                        b_df['signal_type'] = 'BUY'
+                        b_df['description'] = 'MACD, RSI 상승장 다이버전스/골든크로스 매수 신호'
+                        b_df['signal_strength'] = 1.0
+                        signals_df = pd.concat([signals_df, b_df])
+
+                if 'Sell_Signal' in processed_df.columns:
+                    sell_idx = processed_df['Sell_Signal'] == 1
+                    if sell_idx.any():
+                        s_df = processed_df[sell_idx].copy()
+                        s_df['signal_type'] = 'SELL'
+                        s_df['description'] = 'MACD, RSI 과매도 데드크로스 매도 신호'
+                        s_df['signal_strength'] = 1.0
+                        signals_df = pd.concat([signals_df, s_df])
+                        
+                if not signals_df.empty:
+                    db.upsert_trading_signals(signals_df)
                 
                 results.append(symbol)
             except Exception as e:
@@ -569,9 +590,7 @@ class DaskFinanceProcessor:
     def run(self):
         logging.getLogger("distributed.shuffle._scheduler_plugin").setLevel(logging.ERROR)
         
-        # ===== [수정] 두 가지 저장 경로 디렉터리 생성 조치 =====
-        os.makedirs(self.save_dir_csv, exist_ok=True)
-        os.makedirs(self.save_dir_parquet, exist_ok=True)
+        # ===== A1Sheet 파일 경로 제거 =====
         
         input_full_path = os.path.join(self.input_path, self.market_name, self.input_file)
 

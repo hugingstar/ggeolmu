@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ggeolmu Stock - 주식 차트 (매수/매도 시그널) & 실시간 뉴스</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=3">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -38,9 +38,11 @@
     <!-- Search Section -->
     <section class="search-section">
       <div class="input-group search-container">
-        <input type="text" id="symbol-input" placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930, AAPL)" autocomplete="off">
+        <div style="position: relative; flex: 1; display: flex; width: 100%;">
+          <input type="text" id="symbol-input" placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930, AAPL)" autocomplete="off" style="width: 100%;">
+          <div id="autocomplete-box" class="autocomplete-dropdown hidden"></div>
+        </div>
         <button id="search-btn">종목 분석 & 뉴스 조회</button>
-        <div id="autocomplete-box" class="autocomplete-dropdown hidden"></div>
       </div>
       
       <div class="history-panel">
@@ -64,14 +66,19 @@
             <div id="stock-badges"></div>
           </div>
           <!-- DB 연동 주가 조회 기간 선택 버튼 그룹 -->
-          <div class="period-selector-group">
+          <div class="period-selector-group" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
             <span class="period-label">조회 기간:</span>
             <button class="period-btn" data-days="5">5D</button>
-            <button class="period-btn active" data-days="30">1M</button>
+            <button class="period-btn" data-days="30">1M</button>
             <button class="period-btn" data-days="90">3M</button>
-            <button class="period-btn" data-days="180">6M</button>
+            <button class="period-btn active" data-days="180">6M</button>
             <button class="period-btn" data-days="365">1Y</button>
             <button class="period-btn" data-days="1000">ALL</button>
+            <div style="display: flex; align-items: center; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.1rem; margin-left: 0.5rem;">
+              <input type="number" id="custom-days-input" placeholder="N" style="width: 50px; background: transparent; border: none; color: white; text-align: center; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;" min="1" max="5000">
+              <span style="color: var(--text-muted); font-size: 0.85rem; padding-right: 0.5rem;">일</span>
+              <button id="custom-days-btn" style="background: var(--primary-color); color: white; border: none; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer;">조회</button>
+            </div>
           </div>
         </div>
 
@@ -83,11 +90,12 @@
         </div>
 
         <!-- Data Table (Standardized) -->
-        <div class="table-container" style="max-height: 250px; overflow-y: auto;">
+        <div class="table-container" style="max-height: 550px; overflow-y: auto;">
           <table class="data-table" id="stock-table">
             <thead>
               <tr>
                 <th>일자</th>
+                <th>요일</th>
                 <th>종가</th>
                 <th>등락률</th>
                 <th>거래량</th>
@@ -95,7 +103,7 @@
               </tr>
             </thead>
             <tbody id="stock-tbody">
-              <tr><td colspan="5" class="text-center text-muted">검색된 종목 데이터가 없습니다.</td></tr>
+              <tr><td colspan="6" class="text-center text-muted">검색된 종목 데이터가 없습니다.</td></tr>
             </tbody>
           </table>
         </div>

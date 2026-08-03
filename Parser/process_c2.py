@@ -39,9 +39,9 @@ class run_cluster():
         # ------------------------------------------------------------------ #
 
         self.data_info = source_data.describe()
-        self.data_info.to_csv("{}/{}/inputData_info.csv".format(self.SAVE_PATH, self.METHOD), encoding="utf-8-sig")
+        # [삭제됨] self.data_info.to_csv
         
-        source_data.to_csv("{}/{}/inputData.csv".format(self.SAVE_PATH, self.METHOD), encoding="utf-8-sig")
+        # [삭제됨] source_data.to_csv
 
         # 시계열 클러스터링을 위해 Transpose (행: 대상, 열: 시간 흐름)
         data = source_data.transpose()
@@ -103,10 +103,24 @@ class run_cluster():
 
             _data_res = pd.DataFrame(self._data, columns=data.columns, index=self._valid_index)
             _data_res["clusters"] = y_pred
-            _data_res.to_csv(
-                "{}/{}/normalized_dbscan_softdtw.csv".format(self.SAVE_PATH, self.METHOD),
-                encoding="utf-8-sig"
-            )
+            
+            # DB 직행
+            try:
+                from Database.db_manager import DatabaseManager
+                db = DatabaseManager()
+                df_to_db = _data_res.reset_index()
+                df_to_db['Market'] = config.get('MARKET', 'UNKNOWN')
+                df_to_db['TargetDate'] = config.get('TARGET_DATE', datetime.now().strftime('%Y-%m-%d'))
+                if 'symbol' in df_to_db.columns:
+                    df_to_db['Symbol'] = df_to_db['symbol']
+                elif df_to_db.columns[0] != 'Symbol':
+                    df_to_db['Symbol'] = df_to_db[df_to_db.columns[0]]
+                df_to_db['Cluster_ID'] = df_to_db['clusters']
+                df_to_db['Method'] = self.METHOD
+                
+                db.upsert_clustering_results(df_to_db)
+            except Exception as e:
+                print(f"[ERROR] DB 클러스터링 적재 실패: {e}")
 
         # ------------------------------------------------------------------ #
         # 2. KMeans 계열 실행 로직 (Elbow Method 포함)
@@ -130,9 +144,24 @@ class run_cluster():
 
                 _data_res = pd.DataFrame(self._data, columns=data.columns, index=self._valid_index)
                 _data_res["clusters"] = y_pred
-                _data_res.to_parquet(
-                    "{}/{}/normalized_{}.parquet".format(self.SAVE_PATH, self.METHOD, str(n))
-                )
+                
+                # DB 직행
+                try:
+                    from Database.db_manager import DatabaseManager
+                    db = DatabaseManager()
+                    df_to_db = _data_res.reset_index()
+                    df_to_db['Market'] = config.get('MARKET', 'UNKNOWN')
+                    df_to_db['TargetDate'] = config.get('TARGET_DATE', datetime.now().strftime('%Y-%m-%d'))
+                    if 'symbol' in df_to_db.columns:
+                        df_to_db['Symbol'] = df_to_db['symbol']
+                    elif df_to_db.columns[0] != 'Symbol':
+                        df_to_db['Symbol'] = df_to_db[df_to_db.columns[0]]
+                    df_to_db['Cluster_ID'] = df_to_db['clusters']
+                    df_to_db['Method'] = self.METHOD
+                    
+                    db.upsert_clustering_results(df_to_db)
+                except Exception as e:
+                    print(f"[ERROR] DB 클러스터링 적재 실패: {e}")
             
             # Elbow 결과 저장 및 시각화
             if len(self.num_list) > 0:
@@ -317,10 +346,7 @@ class run_cluster():
         })
         elbow_df['sse_diff'] = elbow_df['inertia_sse'].diff().abs()
         
-        save_file = "{}/{}/elbow_results.csv".format(self.SAVE_PATH, self.METHOD)
-        elbow_df.to_csv(save_file, index=False, encoding="utf-8-sig")
-        
-        print("Elbow results CSV saved at: {}".format(save_file))
+        print("Elbow results processed.")
 
     def create_folder(self, directory):
         try:

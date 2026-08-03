@@ -179,6 +179,80 @@ header p {
   opacity: 0.9;
 }
 
+/* Autocomplete UI */
+.autocomplete-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 0.5rem;
+  background: var(--surface-bg);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+  max-height: 350px;
+  overflow-y: auto;
+  z-index: 999;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.autocomplete-dropdown.hidden {
+  display: none;
+}
+
+.autocomplete-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+.autocomplete-dropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+.autocomplete-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+.autocomplete-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 1.25rem;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.2s ease;
+}
+
+.autocomplete-item:last-child {
+  border-bottom: none;
+}
+
+.autocomplete-item:hover {
+  background: rgba(59, 130, 246, 0.15); /* light primary tint */
+  padding-left: 1.75rem;
+}
+
+.ac-name {
+  font-weight: 500;
+  color: var(--text-main);
+  font-size: 0.95rem;
+}
+
+.ac-symbol {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .history-panel {
   display: flex;
   align-items: center;
@@ -549,9 +623,10 @@ header p {
 
 .clusters-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 1.25rem;
   margin-top: 1rem;
+  align-items: stretch;
 }
 
 .cluster-card {
@@ -618,7 +693,7 @@ header p {
 
 .stocks-badge-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.5rem;
 }
 
@@ -651,7 +726,7 @@ header p {
   gap: 0.25rem;
 }
 
-.sb-name { font-weight: 600; color: var(--text-main); font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sb-name { font-weight: 600; color: var(--text-main); font-size: 0.82rem; white-space: normal; word-break: keep-all; overflow-wrap: break-word; }
 .sb-code { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.72rem; }
 .sb-mkt { font-size: 0.65rem; font-weight: 700; color: #60a5fa; background: rgba(59, 130, 246, 0.12); padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
 
@@ -816,6 +891,8 @@ header p {
   border-radius: 0.4rem;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: normal;
+  word-break: keep-all;
 }
 
 .open-modal-btn:hover {
