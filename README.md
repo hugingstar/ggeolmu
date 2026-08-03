@@ -1,9 +1,9 @@
 # 🤖 Ggeolmu Multi-Agent Stock Parser & Analyzer
 
 ## 1. 개요
-`Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집·가공하여 **PostgreSQL 데이터베이스에 적재**하고, 이를 멀티 에이전트(Multi-Agent) 기반으로 분석하여 시각화하는 **4-Tier (WEB-WAS-DB-Manager) 주식 분석 웹 서비스**입니다.
+`Ggeolmu` 프로젝트는 국내(KOSPI, KOSDAQ) 및 해외(NASDAQ, NYSE) 주식 데이터를 수집·가공하여 **로컬 파일(CSV/Parquet) 생성 없이 100% PostgreSQL 데이터베이스에만 적재**하고, 이를 멀티 에이전트(Multi-Agent) 기반으로 분석하여 시각화하는 **4-Tier (WEB-WAS-DB-Manager) 주식 분석 웹 서비스**입니다.
 
-macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **`PipelineLifecycleAgent` 및 파이프라인 모니터링 대시보드 (`/pipeline`)**, **검색종목 유연 매핑(Symbol ➡ 종목명)**, **`get_dynamic_cluster_config()` 동적 자원 자동 감지 모듈**, **`Database/queries/` 16개 SQL 다중 자동 로딩**, **100% DB 다이렉트 통신 (파일 I/O 병목 완벽 제거)** 및 **`fdr.StockListing` 기반 0.5초 초고속 DB 직행 증분 수집(DB-Centric Bulk Ingestion)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 빠르게 갱신합니다.
+macOS 환경에 맞춘 시스템 파일 디스크립터 상향(`ulimit -n 65,536`), **파이프라인 모니터링 대시보드 (`/pipeline`)**, **검색종목 유연 매핑(Symbol ➡ 종목명)**, **`get_dynamic_cluster_config()` 동적 자원 자동 감지 모듈**, **`Database/queries/` 16개 SQL 다중 자동 로딩**, **100% Serverless DB Architecture (파일 I/O 찌꺼기 완벽 제거)**, **yfinance 기반 다중 스레드 초고속 미국 마켓 일괄 수집**, 그리고 **SoftDTW 클러스터링 다중 코어 개방(`n_jobs=-1`)** 구조를 적용하여 최신 주가 및 기술적 지표를 안전하고 극단적으로 빠르게 갱신합니다.
 
 ---
 
@@ -21,16 +21,14 @@ flowchart TD
     classDef logicNode fill:#d97706,stroke:#fcd34d,stroke-width:2.5px,color:#ffffff,font-size:15px,font-weight:bold;
 
     %% 1단계: DB 중심 지능형 증분 수집 (Smart Ingestion)
-    subgraph Step1 ["1단계: DB 중심 지능형 증분 수집 (Smart Ingestion)"]
+    subgraph Step1 ["1단계: DB 중심 지능형 증분 수집 (No Local Files)"]
         direction TB
         DB_Check{"기존 데이터 MAX Date 확인"}:::logicNode
         
-        DB_Check -->|초기 구동 데이터 없음| FullFetch["🐍 2000년부터 풀 데이터 수집<br>(Dask 병렬, 약 20분 소요)"]:::pythonEngine
-        DB_Check -->|기존 데이터 존재| DeltaFetch["⚡ 0.5초 초고속 증분 수집<br>(어제/최신 시세만 일괄 적재)"]:::pythonEngine
+        DB_Check -->|한국/미국 마켓 수집| DeltaFetch["⚡ yfinance Multi-thread (미국)<br>fdr.StockListing (한국)<br>초고속 증분 수집 (메모리 로드)"]:::pythonEngine
         
-        DB_Raw[("💾 DB: raw_stock_data<br>(16개 SQL 중앙 관리)")]:::dbStorage
-        FullFetch -->|안전한 Upsert 중복방지| DB_Raw
-        DeltaFetch -->|안전한 Upsert 중복방지| DB_Raw
+        DB_Raw[("💾 DB: raw_stock_data<br>(로컬 파일 찌꺼기 없음)")]:::dbStorage
+        DeltaFetch -->|안전한 Upsert (DB 직결)| DB_Raw
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
@@ -43,13 +41,13 @@ flowchart TD
     end
 
     %% 3단계: 시계열 클러스터링
-    subgraph Step3 ["3단계: 시가총액 & 시계열 클러스터링 (DB Direct Ingestion)"]
+    subgraph Step3 ["3단계: 멀티 코어 클러스터링 (Full CPU Unlock)"]
         direction TB
         ProcessM1["🐍 process_m1_cap.py<br>(시가총액 데이터 가공)"]:::pythonEngine -->|시총 직행 적재| DB_Cap[("💾 DB: market_cap")]:::dbStorage
         ProcessM1 -->|정규화| ProcessC1["🐍 process_c1.py<br>(1d/1w/1m Z-Score 산출)"]:::pythonEngine
         ProcessC1 -->|Z_Score 직행 적재| DB_ZScore[("💾 DB: zscore_features")]:::dbStorage
-        ProcessC1 -->|SoftDTW 군집화| ProcessC2["🐍 process_c2.py<br>(SoftDTW K-Means 군집화)"]:::pythonEngine
-        ProcessC2 -->|군집 결과 직행 적재| DB_Cluster[("💾 DB: clustering_results")]:::dbStorage
+        ProcessC1 -->|n_jobs=-1 100% 점유| ProcessC2["🐍 process_c2.py<br>(SoftDTW 다중 스레드 군집화)"]:::pythonEngine
+        ProcessC2 -->|군집 결과 최신화| DB_Cluster[("💾 DB: clustering_results")]:::dbStorage
     end
 
     %% 4단계: 4-Tier 웹 서비스 & 멀티 에이전트
@@ -65,7 +63,7 @@ flowchart TD
         WAS <--> PromptAgent["🤖 Manager: PromptMakerAgent<br>(5일 시세/지표 퀀트분석)"]:::agentManager
         WAS -->|프롬프트 기록| DB_Logs[("💾 DB: prompt_logs")]:::dbStorage
         
-        PipeAgent["🤖 Manager: PipelineLifecycleAgent<br>(파이프라인 시작/끝/소요시간/성공 모니터링)"]:::agentManager -->|라이프사이클 기록| DB_PipeLogs[("💾 DB: pipeline_execution_logs")]:::dbStorage
+        PipeAgent["🤖 Manager: PipelineLifecycleAgent<br>(상태, 에러 로그 모니터링)"]:::agentManager -->|라이프사이클 기록| DB_PipeLogs[("💾 DB: pipeline_execution_logs")]:::dbStorage
         SecAgent["🤖 Manager: WebSecurityAgent<br>(WEB-WAS-DB 취약점 탐지)"]:::agentManager -.- WAS
     end
 
