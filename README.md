@@ -28,7 +28,7 @@ flowchart TD
         DB_Check -->|한국/미국 마켓 수집| DeltaFetch["⚡ yfinance Multi-thread (미국)<br>fdr.StockListing (한국)<br>초고속 증분 수집 (메모리 로드)"]:::pythonEngine
         
         DB_Raw[("💾 DB: raw_stock_data<br>(로컬 파일 찌꺼기 없음)")]:::dbStorage
-        DeltaFetch -->|안전한 Upsert (DB 직결)| DB_Raw
+        DeltaFetch -->|안전한 Upsert, DB 직결| DB_Raw
     end
 
     %% 2단계: 기술적 지표 및 시그널 연산
