@@ -68,10 +68,10 @@ flowchart TD
     end
 
     %% [위에서 아래로 이어지는 수직 메인 데이터 흐름선]
-    Step1 ==>|1. raw_stock_data 공급| Step2
-    Step1 ==>|2. raw_stock_data 공급| Step3
-    Step2 ==>|3. 분석 지표 및 시그널 공급| Step4
-    Step3 ==>|4. 군집 공급| Step4
+    Step1 == 1. raw_stock_data 공급 ==> Step2
+    Step1 == 2. raw_stock_data 공급 ==> Step3
+    Step2 == 3. 분석 지표 및 시그널 공급 ==> Step4
+    Step3 == 4. 군집 공급 ==> Step4
 ```
 
 ---
@@ -166,9 +166,7 @@ erDiagram
 
 ```mermaid
 flowchart LR
-    classDef largeFont font-size:15px, padding:10px, line-height:1.4;
-
-    Start(("Input Data")):::largeFont --> Group1
+    classDef largeFont font-size:15px,padding:10px,line-height:1.4;
 
     subgraph Group1 ["1. 가격 & 거래량 지표"]
         direction TB
@@ -178,8 +176,6 @@ flowchart LR
         Step1 --> Step2 --> Step3
     end
 
-    Group1 --> Group2
-
     subgraph Group2 ["2. 오실레이터 & 밴드 지표"]
         direction TB
         Step4["4. RSI & Divergence<br>RSI, RSI2~9, RSI_Signal, RSI_Signal2~9<br>RSI_BullDiv, RSI_BearDiv, RSI_Hidden_BullDiv, RSI_Hidden_BearDiv<br>RSI_UpTrend, RSI_DownTrend<br>RSI_Signal_Sum, RSI_BullDiv_Sum, RSI_BearDiv_Sum<br>RSI_Hidden_BullDiv_Sum, RSI_Hidden_BearDiv_Sum<br>RSI_UpTrend_Sum, RSI_DownTrend_Sum"]:::largeFont
@@ -187,8 +183,6 @@ flowchart LR
         Step6["6. CCI<br>CCI, CCI2~9, CCI_Signal, CCI_Signal2~9, CCI_Signal_Sum"]:::largeFont
         Step4 --> Step5 --> Step6
     end
-
-    Group2 --> Group3
 
     subgraph Group3 ["3. 추세 & 모멘텀 지표"]
         direction TB
@@ -198,8 +192,6 @@ flowchart LR
         Step7 --> Step8 --> Step9
     end
 
-    Group3 --> Group4
-
     subgraph Group4 ["4. 최종 시그널"]
         direction TB
         Step10["10. MDD<br>High_watermark, MDD"]:::largeFont
@@ -207,7 +199,11 @@ flowchart LR
         Step10 --> Step11
     end
 
-    Group4 --> End(("Output DataFrame")):::largeFont
+    StartNode(("Input Data")):::largeFont --> Group1
+    Group1 --> Group2
+    Group2 --> Group3
+    Group3 --> Group4
+    Group4 --> EndNode(("Output DataFrame")):::largeFont
 ```
 
 ---
